@@ -65,7 +65,7 @@ function PDLP(
 
     # Run the main loop kernel
     max_size = max(PDLP_data.dims.n_vars, PDLP_data.dims.current_LP_length)
-    max_req = Int32(min(256, max(32, ceil(Int, max_size/32)*32)))
+    max_req = Int32(min(256, max(32, ceil(Int, max_size/32)*32))) # number of threads per LP based on LP size
 
     # Reset total solve and iteration number counters
     PDLP_data.global_counter .= Int32(0)
@@ -92,23 +92,15 @@ function PDLP(
             PDLP_data.active_constraint,
             PDLP_data.variable_rescaling, 
             PDLP_data.constraint_rescaling, 
-            PDLP_data.kernel_storage.last_restart_primal_solution,
-            PDLP_data.kernel_storage.last_restart_primal_gradient,
-            PDLP_data.kernel_storage.last_restart_dual_solution,
-            PDLP_data.kernel_storage.last_restart_primal_product,
             PDLP_data.kernel_storage.current_primal_solution,
             PDLP_data.kernel_storage.current_dual_solution,
             PDLP_data.kernel_storage.current_dual_product,
             PDLP_data.kernel_storage.current_primal_product,
             PDLP_data.kernel_storage.buffer_primal_gradient,
-            PDLP_data.kernel_storage.avg_primal_solution,
-            PDLP_data.kernel_storage.avg_primal_gradient,
-            PDLP_data.kernel_storage.avg_dual_solution,
-            PDLP_data.kernel_storage.avg_primal_product,
-            PDLP_data.kernel_storage.sum_primal_solutions,
-            PDLP_data.kernel_storage.sum_dual_solutions,
-            PDLP_data.kernel_storage.sum_primal_product,
-            PDLP_data.kernel_storage.sum_dual_product,
+            PDLP_data.kernel_storage.initial_primal_solution,
+            PDLP_data.kernel_storage.initial_dual_solution,
+            PDLP_data.kernel_storage.next_primal_solution,
+            PDLP_data.kernel_storage.next_dual_solution,
             PDLP_data.kernel_storage.original_primal_solution,
             PDLP_data.kernel_storage.original_primal_gradient,
             PDLP_data.kernel_storage.original_dual_solution,
@@ -121,6 +113,8 @@ function PDLP(
             PDLP_data.kernel_storage.delta_primal,
             PDLP_data.kernel_storage.delta_primal_product,
             PDLP_data.kernel_storage.delta_dual,
+            PDLP_data.kernel_storage.delta_primal_halpern,
+            PDLP_data.kernel_storage.delta_dual_halpern,
             PDLP_data.primal_weight,
             PDLP_data.step_size,
             PDLP_data.termination_reason,
@@ -130,12 +124,14 @@ function PDLP(
             PDLP_data.dims.n_vars,
             PDLP_data.parameters.iteration_limit,
             PDLP_data.parameters.kkt_matrix_pass_limit,
-            PDLP_data.parameters.termination_evaluation_frequency,
             PDLP_data.parameters.necessary_reduction_for_restart,
             PDLP_data.parameters.sufficient_reduction_for_restart,
+            PDLP_data.parameters.artificial_ratio_for_restart,
             PDLP_data.parameters.extrapolation_coefficient,
-            PDLP_data.parameters.reduction_exponent,
-            PDLP_data.parameters.growth_exponent,
+            PDLP_data.parameters.reflection_coefficient,
+            PDLP_data.parameters.pid_KP,
+            PDLP_data.parameters.pid_KI,
+            PDLP_data.parameters.pid_KD,
             PDLP_data.parameters.termination_criteria.eps_optimal_absolute,
             PDLP_data.parameters.termination_criteria.eps_optimal_relative,
             PDLP_data.parameters.termination_criteria.eps_primal_infeasible,

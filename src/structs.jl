@@ -144,23 +144,15 @@ mutable struct TerminationCriteria
 end
 
 mutable struct KernelStorage
-    last_restart_primal_solution::CuArray{Float64}
-    last_restart_primal_gradient::CuArray{Float64}
-    last_restart_dual_solution::CuArray{Float64}
-    last_restart_primal_product::CuArray{Float64}
     current_primal_solution::CuArray{Float64}
     current_dual_solution::CuArray{Float64}
     current_dual_product::CuArray{Float64}
     current_primal_product::CuArray{Float64}
     buffer_primal_gradient::CuArray{Float64}
-    avg_primal_solution::CuArray{Float64}
-    avg_primal_gradient::CuArray{Float64}
-    avg_dual_solution::CuArray{Float64}
-    avg_primal_product::CuArray{Float64}
-    sum_primal_solutions::CuArray{Float64}
-    sum_dual_solutions::CuArray{Float64}
-    sum_primal_product::CuArray{Float64}
-    sum_dual_product::CuArray{Float64}
+    initial_primal_solution::CuArray{Float64}
+    initial_dual_solution::CuArray{Float64}
+    next_primal_solution::CuArray{Float64}
+    next_dual_solution::CuArray{Float64}
     original_primal_solution::CuArray{Float64}
     original_primal_gradient::CuArray{Float64}
     original_dual_solution::CuArray{Float64}
@@ -173,6 +165,8 @@ mutable struct KernelStorage
     delta_primal::CuArray{Float64}
     delta_primal_product::CuArray{Float64}
     delta_dual::CuArray{Float64}
+    delta_primal_halpern::CuArray{Float64}
+    delta_dual_halpern::CuArray{Float64}
 end
 
 
@@ -180,16 +174,18 @@ mutable struct PDLPParams
     ruiz_iterations::Int
     pock_chambolle_alpha::Union{Nothing,Float64}
     scale_initial_primal_weight::Bool
-    termination_evaluation_frequency::Int32
     extrapolation_coefficient::Float64
-    reduction_exponent::Float64
-    growth_exponent::Float64
+    reflection_coefficient::Float64
     kkt_matrix_pass_limit::Float64
     necessary_reduction_for_restart::Float64
     sufficient_reduction_for_restart::Float64
+    artificial_ratio_for_restart::Float64
     iteration_limit::Int32
     skip_hard_problems::Bool
     termination_criteria::TerminationCriteria
+    pid_KP::Float64
+    pid_KI::Float64
+    pid_KD::Float64
 end
 
 mutable struct PDLPDims
