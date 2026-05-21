@@ -33,7 +33,7 @@ function main_loop_kernel(
     current_dual_solution,            # [n_LPs × total_LP_length] = Current y~ (scaled)
     current_dual_product,             # [n_LPs, n_vars] = Cached G~^T * y~ to avoid recomputing
     current_primal_product,           # [n_LPs × total_LP_length] = Cached G~ * x~ to avoid recomputing (scaled)
-    buffer_primal_gradient,           # [n_LPs, n_vars] = Generally the avg_primal_gradient, but used for some other purposes 
+    buffer_primal_gradient,           # [n_LPs, n_vars] = 
     initial_primal_solution,
     initial_dual_solution,
     next_primal_solution,
@@ -165,35 +165,6 @@ function main_loop_kernel(
         # Set up the starting row for this LP (minus 1, so that the first
         # row to consider is `active_row + 1`)
         active_row = (LP-Int32(1)) * total_LP_length 
-        
-        # initialize the primal anchor ([n_LPs, n_vars] = represents point x0~ that we start PDHG steps from)
-
-        while idx <= n_vars
-            initial_primal_solution[LP, idx] = current_primal_solution[LP, idx]
-            idx += block_stride
-        end
-        idx = threadIdx().x
-
-        # initialize the dual anchor ([n_LPs × total_LP_length] = represents point y0~ that we start PDHG steps from)
-        while idx <= current_LP_length
-            initial_dual_solution[active_row + idx] = current_dual_solution[active_row + idx]
-            idx += block_stride
-        end
-        idx = threadIdx().x
-
-        # initializing next_primal_solution ([n_LPs, n_vars] = primal solution after one PDHG step)
-        while idx <= n_vars
-            next_primal_solution[LP, idx] = current_primal_solution[LP, idx]
-            idx += block_stride
-        end
-        idx = threadIdx().x
-        
-        # initialize the next_dual_solution ([n_LPs x total_LP_length] = dual solution after one PDHG step)
-        while idx <= current_LP_length
-            next_dual_solution[active_row + idx] = current_dual_solution[active_row + idx]
-            idx += block_stride
-        end
-        idx = threadIdx().x
 
         # Set up current values to match inputs
         while idx <= n_vars

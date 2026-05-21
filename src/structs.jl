@@ -147,17 +147,17 @@ mutable struct KernelStorage
     current_primal_solution::CuArray{Float64}
     current_dual_solution::CuArray{Float64}
     current_dual_product::CuArray{Float64}
-    current_primal_product::CuArray{Float64}
-    buffer_primal_gradient::CuArray{Float64}
-    initial_primal_solution::CuArray{Float64}
-    initial_dual_solution::CuArray{Float64}
-    next_primal_solution::CuArray{Float64}
-    next_dual_solution::CuArray{Float64}
+    current_primal_product::CuArray{Float64} +
+    buffer_primal_gradient::CuArray{Float64} 
+    initial_primal_solution::CuArray{Float64} 
+    initial_dual_solution::CuArray{Float64} 
+    next_primal_solution::CuArray{Float64} 
+    next_dual_solution::CuArray{Float64} 
     original_primal_solution::CuArray{Float64}
-    original_primal_gradient::CuArray{Float64}
-    original_dual_solution::CuArray{Float64}
-    original_primal_product::CuArray{Float64}
-    buffer_kkt_primal_solution::CuArray{Float64}
+    original_primal_gradient::CuArray{Float64} 
+    original_dual_solution::CuArray{Float64} 
+    original_primal_product::CuArray{Float64} 
+    buffer_kkt_primal_solution::CuArray{Float64} 
     buffer_kkt_primal_product::CuArray{Float64}
     buffer_kkt_lower_variable_violation::CuArray{Float64}
     buffer_kkt_upper_variable_violation::CuArray{Float64}
@@ -249,16 +249,18 @@ function PDLPData(
     total_LP_length::Int;
     sparsity::Matrix{Bool} = fill(true, total_LP_length, n_vars),
     iteration_limit::Int = Int(typemax(Int32)),
-    termination_evaluation_frequency::Int = 64,
     extrapolation_coefficient::Float64 = 1.0,
-    reduction_exponent::Float64 = 0.3,
-    growth_exponent::Float64 = 0.6,
+    reflection_coefficient::Float64 = 1.0,
     kkt_matrix_pass_limit::Float64 = Inf,
     necessary_reduction_for_restart::Float64 = 0.8,
     sufficient_reduction_for_restart::Float64 = 0.2,
+    artificial_ratio_for_restart::Float64 = 0.36,
     abs_tol::Float64 = 1.0E-8,
     rel_tol::Float64 = 1.0E-8,
     skip_hard_problems::Bool = false,
+    pid_KP::Float64 = 0.99,
+    pid_KI::Float64 = 0.01,
+    pid_KD::Float64 = 0.0
     )
     # Call the sparse constructor to get sparsity information
     nz, nz_rows, nz_cols = sparse_constructor(sparsity)
@@ -289,33 +291,27 @@ function PDLPData(
         # CuArray{Float64}(undef, n_LPs, n_vars), # Initial dual product
         KernelStorage(
             CUDA.zeros(Float64, n_LPs, n_vars),
-            CUDA.zeros(Float64, n_LPs, n_vars),
-            CUDA.zeros(Float64, total_LP_length * n_LPs),
             CUDA.zeros(Float64, total_LP_length * n_LPs),
             CUDA.zeros(Float64, n_LPs, n_vars),
             CUDA.zeros(Float64, total_LP_length * n_LPs),
+            CUDA.zeros(Float64, n_LPs, n_vars), 
+            CUDA.zeros(Float64, n_LPs, n_vars), 
+            CUDA.zeros(Float64, total_LP_length * n_LPs), 
+            CUDA.zeros(Float64, n_LPs, n_vars), 
+            CUDA.zeros(Float64, total_LP_length * n_LPs), 
+            CUDA.zeros(Float64, n_LPs, n_vars), 
+            CUDA.zeros(Float64, n_LPs, n_vars), 
+            CUDA.zeros(Float64, total_LP_length * n_LPs), 
+            CUDA.zeros(Float64, total_LP_length * n_LPs), 
+            CUDA.zeros(Float64, n_LPs, n_vars), 
+            CUDA.zeros(Float64, total_LP_length * n_LPs),
+            CUDA.zeros(Float64, n_LPs, n_vars), 
             CUDA.zeros(Float64, n_LPs, n_vars),
+            CUDA.zeros(Float64, n_LPs, n_vars), 
+            CUDA.zeros(Float64, n_LPs, n_vars), 
+            CUDA.zeros(Float64, total_LP_length * n_LPs),
             CUDA.zeros(Float64, total_LP_length * n_LPs),
             CUDA.zeros(Float64, n_LPs, n_vars),
-            CUDA.zeros(Float64, n_LPs, n_vars),
-            CUDA.zeros(Float64, n_LPs, n_vars),
-            CUDA.zeros(Float64, total_LP_length * n_LPs),
-            CUDA.zeros(Float64, total_LP_length * n_LPs),
-            CUDA.zeros(Float64, n_LPs, n_vars),
-            CUDA.zeros(Float64, total_LP_length * n_LPs),
-            CUDA.zeros(Float64, total_LP_length * n_LPs),
-            CUDA.zeros(Float64, n_LPs, n_vars),
-            CUDA.zeros(Float64, n_LPs, n_vars),
-            CUDA.zeros(Float64, n_LPs, n_vars),
-            CUDA.zeros(Float64, total_LP_length * n_LPs),
-            CUDA.zeros(Float64, total_LP_length * n_LPs),
-            CUDA.zeros(Float64, n_LPs, n_vars),
-            CUDA.zeros(Float64, total_LP_length * n_LPs),
-            CUDA.zeros(Float64, n_LPs, n_vars),
-            CUDA.zeros(Float64, n_LPs, n_vars),
-            CUDA.zeros(Float64, n_LPs, n_vars),
-            CUDA.zeros(Float64, n_LPs, n_vars),
-            CUDA.zeros(Float64, total_LP_length * n_LPs),
             CUDA.zeros(Float64, total_LP_length * n_LPs)
         ),
         PDLPParams( # Parameters
@@ -324,11 +320,11 @@ function PDLPData(
             true,                             # Scale initial primal weight flag
             termination_evaluation_frequency, # Termination evaluation frequency
             extrapolation_coefficient,        # Extrapolation coefficient used for taking steps
-            reduction_exponent,               # Reduction exponent (for step size updates)
-            growth_exponent,                  # Growth coefficient (for step size updates)
+            reflection_coefficient,           # Reflection Coefficient for Halpern Scheme
             kkt_matrix_pass_limit,            # Limit for KKT matrix passes (default Inf)
             necessary_reduction_for_restart,  # Necessary reduction for restart (default 0.8)
             sufficient_reduction_for_restart, # Sufficient reduction for restart (default 0.2)
+            artificial_ratio_for_restart,     # Long Inner Loop restarting condition ratio
             iteration_limit,                  # Iteration limit (default typemax(Int32))
             skip_hard_problems,               # Flag to skip problems with too many iterations
             TerminationCriteria(
@@ -339,7 +335,10 @@ function PDLPData(
                 Inf,              # Time limit (s)
                 iteration_limit,  # Iteration limit
                 kkt_matrix_pass_limit # KKT matrix pass limit,
-            )
+            ),
+            pid_KP,
+            pid_KI,
+            pid_KD
         ),
         PDLPDims(   
             Int32(0),               # Current LP length
