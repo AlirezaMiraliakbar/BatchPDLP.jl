@@ -147,7 +147,7 @@ mutable struct KernelStorage
     current_primal_solution::CuArray{Float64}
     current_dual_solution::CuArray{Float64}
     current_dual_product::CuArray{Float64}
-    current_primal_product::CuArray{Float64} +
+    current_primal_product::CuArray{Float64}
     buffer_primal_gradient::CuArray{Float64} 
     initial_primal_solution::CuArray{Float64} 
     initial_dual_solution::CuArray{Float64} 
