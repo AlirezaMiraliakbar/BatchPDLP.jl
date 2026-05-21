@@ -318,7 +318,6 @@ function PDLPData(
             10,                               # Iterations for Ruiz rescaling
             1.0,                              # Alpha for Pock Chambolle rescaling
             true,                             # Scale initial primal weight flag
-            termination_evaluation_frequency, # Termination evaluation frequency
             extrapolation_coefficient,        # Extrapolation coefficient used for taking steps
             reflection_coefficient,           # Reflection Coefficient for Halpern Scheme
             kkt_matrix_pass_limit,            # Limit for KKT matrix passes (default Inf)
