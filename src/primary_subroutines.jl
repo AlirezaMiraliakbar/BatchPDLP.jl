@@ -54,15 +54,16 @@ function PDLP(
 
     # Scale the primal weight if desired (otherwise it should be 1.0)
     # (Could also put this inside the main kernel)
-    if PDLP_data.parameters.scale_initial_primal_weight
-        select_initial_primal_weight(PDLP_data.primal_weight, PDLP_data.scaled_problem, PDLP_data.dims)
-    else
-        PDLP_data.primal_weight .= 1.0
-    end
-
+    # if PDLP_data.parameters.scale_initial_primal_weight
+        # select_initial_primal_weight(PDLP_data.primal_weight, PDLP_data.scaled_problem, PDLP_data.dims)
+    # else
+        
+    # end
+    PDLP_data.primal_weight .= 1.0
     # Come up with a starting step size (Could also put this inside the kernel)
-    update_step_size(PDLP_data.scaled_problem, PDLP_data.step_size, PDLP_data.dims)
-
+    update_constant_step_size(PDLP_data.scaled_problem, PDLP_data.step_size, PDLP_data.dims)
+    display("BatchPDLPx Step size = $(PDLP_data.step_size), Primal Weight = $(PDLP_data.primal_weight)")
+    # error("avocado!")
     # Run the main loop kernel
     max_size = max(PDLP_data.dims.n_vars, PDLP_data.dims.current_LP_length)
     max_req = Int32(min(256, max(32, ceil(Int, max_size/32)*32))) # number of threads per LP based on LP size
@@ -85,7 +86,6 @@ function PDLP(
             PDLP_data.scaled_problem.constraint_matrix,
             PDLP_data.scaled_problem.right_hand_side,
             PDLP_data.scaled_problem.objective_vector,
-            PDLP_data.scaled_problem.objective_constant,
             PDLP_data.sparsity.nz_count[PDLP_data.dims.current_LP_length],
             PDLP_data.sparsity.nz_rows,
             PDLP_data.sparsity.nz_cols,
@@ -96,11 +96,11 @@ function PDLP(
             PDLP_data.kernel_storage.current_dual_solution,
             PDLP_data.kernel_storage.current_dual_product,
             PDLP_data.kernel_storage.current_primal_product,
-            PDLP_data.kernel_storage.buffer_primal_gradient,
+            PDLP_data.kernel_storage.current_primal_gradient,
             PDLP_data.kernel_storage.initial_primal_solution,
             PDLP_data.kernel_storage.initial_dual_solution,
-            PDLP_data.kernel_storage.next_primal_solution,
-            PDLP_data.kernel_storage.next_dual_solution,
+            PDLP_data.kernel_storage.pdhg_primal_solution,
+            PDLP_data.kernel_storage.pdhg_dual_solution,
             PDLP_data.kernel_storage.original_primal_solution,
             PDLP_data.kernel_storage.original_primal_gradient,
             PDLP_data.kernel_storage.original_dual_solution,
@@ -113,8 +113,6 @@ function PDLP(
             PDLP_data.kernel_storage.delta_primal,
             PDLP_data.kernel_storage.delta_primal_product,
             PDLP_data.kernel_storage.delta_dual,
-            PDLP_data.kernel_storage.delta_primal_halpern,
-            PDLP_data.kernel_storage.delta_dual_halpern,
             PDLP_data.primal_weight,
             PDLP_data.step_size,
             PDLP_data.termination_reason,
@@ -124,6 +122,7 @@ function PDLP(
             PDLP_data.dims.n_vars,
             PDLP_data.parameters.iteration_limit,
             PDLP_data.parameters.kkt_matrix_pass_limit,
+            PDLP_data.parameters.termination_evaluation_frequency,
             PDLP_data.parameters.necessary_reduction_for_restart,
             PDLP_data.parameters.sufficient_reduction_for_restart,
             PDLP_data.parameters.artificial_ratio_for_restart,

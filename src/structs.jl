@@ -52,8 +52,7 @@ RestartChoice specifies whether a restart was performed on a given iteration.
 @enum RestartChoice begin
     RESTART_CHOICE_UNSPECIFIED
     RESTART_CHOICE_NO_RESTART
-    RESTART_CHOICE_WEIGHTED_AVERAGE_RESET
-    RESTART_CHOICE_RESTART_TO_AVERAGE
+    RESTART_CHOICE_LAST_ITERATE_RESET
 end
 
 mutable struct LinearProgramSet
@@ -148,11 +147,11 @@ mutable struct KernelStorage
     current_dual_solution::CuArray{Float64}
     current_dual_product::CuArray{Float64}
     current_primal_product::CuArray{Float64}
-    buffer_primal_gradient::CuArray{Float64} 
+    current_primal_gradient::CuArray{Float64} 
     initial_primal_solution::CuArray{Float64} 
     initial_dual_solution::CuArray{Float64} 
-    next_primal_solution::CuArray{Float64} 
-    next_dual_solution::CuArray{Float64} 
+    pdhg_primal_solution::CuArray{Float64} 
+    pdhg_dual_solution::CuArray{Float64} 
     original_primal_solution::CuArray{Float64}
     original_primal_gradient::CuArray{Float64} 
     original_dual_solution::CuArray{Float64} 
@@ -177,6 +176,7 @@ mutable struct PDLPParams
     extrapolation_coefficient::Float64
     reflection_coefficient::Float64
     kkt_matrix_pass_limit::Float64
+    termination_evaluation_frequency::Float64
     necessary_reduction_for_restart::Float64
     sufficient_reduction_for_restart::Float64
     artificial_ratio_for_restart::Float64
@@ -252,7 +252,8 @@ function PDLPData(
     extrapolation_coefficient::Float64 = 1.0,
     reflection_coefficient::Float64 = 1.0,
     kkt_matrix_pass_limit::Float64 = Inf,
-    necessary_reduction_for_restart::Float64 = 0.8,
+    termination_evaluation_frequency::Int64 = 1000,
+    necessary_reduction_for_restart::Float64 = 0.5,
     sufficient_reduction_for_restart::Float64 = 0.2,
     artificial_ratio_for_restart::Float64 = 0.36,
     abs_tol::Float64 = 1.0E-8,
@@ -321,6 +322,7 @@ function PDLPData(
             extrapolation_coefficient,        # Extrapolation coefficient used for taking steps
             reflection_coefficient,           # Reflection Coefficient for Halpern Scheme
             kkt_matrix_pass_limit,            # Limit for KKT matrix passes (default Inf)
+            termination_evaluation_frequency, # Number of PDLP steps to take before checking termination criteria (default: 200)
             necessary_reduction_for_restart,  # Necessary reduction for restart (default 0.8)
             sufficient_reduction_for_restart, # Sufficient reduction for restart (default 0.2)
             artificial_ratio_for_restart,     # Long Inner Loop restarting condition ratio

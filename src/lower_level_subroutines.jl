@@ -479,3 +479,33 @@ function add_multiple_LP_lower_bound(
 end
 
 
+function update_constant_step_size(problem::LinearProgramSet, step_size::CuArray{Float64}, dims::PDLPDims)
+    # println("calculating step size using power iteration...")
+    n_vars = dims.n_vars
+    max_value = max(dims.current_LP_length, n_vars)
+    shmem_bytes = max_value * sizeof(Float64) 
+
+    GPU_blocks = Int32(CUDA.attribute(CUDA.device(), CUDA.DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT))
+    threads_per_block = 256 
+    iterations = Int32(5000) 
+    
+    guess_vector = CUDA.randn(Float64, dims.n_LPs, dims.n_vars)
+    u_vec = CUDA.zeros(Float64, dims.total_LP_length * dims.n_LPs)
+    new_vector = CUDA.zeros(Float64, dims.n_LPs, dims.n_vars)
+
+    CUDA.@sync @cuda blocks=GPU_blocks threads=threads_per_block shmem=shmem_bytes group_power_kernel(
+        step_size, 
+        problem.constraint_matrix, 
+        dims.n_LPs, 
+        dims.total_LP_length, 
+        dims.current_LP_length,
+        u_vec,  
+        guess_vector,  
+        new_vector,    
+        iterations,
+        1e-4,
+    )
+
+    return nothing
+end
+
