@@ -169,6 +169,9 @@ mutable struct KernelStorage
     delta_primal::CuArray{Float64}
     delta_primal_product::CuArray{Float64}
     delta_dual::CuArray{Float64}
+    guess_vector::CuArray{Float64}
+    new_vector::CuArray{Float64}
+    u_vector::CuArray{Float64}
 end
 
 
@@ -190,6 +193,7 @@ mutable struct PDLPParams
     pid_KP::Float64
     pid_KI::Float64
     pid_KD::Float64
+    i_smooth::Float64
 end
 
 mutable struct PDLPDims
@@ -256,7 +260,7 @@ function PDLPData(
     extrapolation_coefficient::Float64 = 1.0,
     reflection_coefficient::Float64 = 1.0,
     kkt_matrix_pass_limit::Float64 = Inf,
-    termination_evaluation_frequency::Int64 = 200,
+    termination_evaluation_frequency::Int64 = 3,
     necessary_reduction_for_restart::Float64 = 0.5,
     sufficient_reduction_for_restart::Float64 = 0.2,
     artificial_ratio_for_restart::Float64 = 0.36,
@@ -265,7 +269,8 @@ function PDLPData(
     skip_hard_problems::Bool = false,
     pid_KP::Float64 = 0.99,
     pid_KI::Float64 = 0.01,
-    pid_KD::Float64 = 0.0
+    pid_KD::Float64 = 0.0,
+    i_smooth::Float64 = 0.3
     )
     # Call the sparse constructor to get sparsity information
     nz, nz_rows, nz_cols = sparse_constructor(sparsity)
@@ -323,6 +328,9 @@ function PDLPData(
             CUDA.zeros(Float64, n_LPs, n_vars), 
             CUDA.zeros(Float64, total_LP_length * n_LPs),
             CUDA.zeros(Float64, total_LP_length * n_LPs),
+            CUDA.ones(Float64, n_LPs, n_vars),
+            CUDA.zeros(Float64, n_LPs, n_vars),
+            CUDA.zeros(Float64, total_LP_length * n_LPs)
         ),
         PDLPParams( # Parameters
             10,                               # Iterations for Ruiz rescaling
@@ -349,7 +357,8 @@ function PDLPData(
             ),
             pid_KP,
             pid_KI,
-            pid_KD
+            pid_KD,
+            i_smooth
         ),
         PDLPDims(   
             Int32(0),               # Current LP length

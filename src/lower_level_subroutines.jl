@@ -124,10 +124,6 @@ function bound_objective_rescaling(
         dims.total_LP_length, 
     )
 
-    # println("contribution is calculated as: \n")
-    # println(contrib)
-    # println("we are golden at contrib")
-
     # 2. Calculate the norms
     # sum(contrib) directly replaces the complex cub::DeviceReduce block
     bnd_norm = sqrt(sum(contrib))
@@ -150,22 +146,14 @@ function bound_objective_rescaling(
     problem.right_hand_side         .*= constraint_scale
     problem.variable_lower_bounds    .*= constraint_scale
     problem.variable_upper_bounds    .*= constraint_scale
-    # problem.initial_primal_solution .*= constraint_scale
+
     constraint_rescaling .= constraint_scale
     variable_rescaling   .= constraint_scale
     # Dual-space & Objective (scaled by objective_scale)
-    # problem.initial_dual_solution   .*= objective_scale
+
     problem.objective_vector        .*= objective_scale
     problem.objective_constant      .*= objective_scale
 
-    # println("Scaled Right Hand Side: \n")
-    # println(problem.right_hand_side)
-    # println("we are golden at right hand side")
-
-    # println("Scaled Objective Vector: \n")
-    # println(problem.objective_vector)
-
-    # error("avocado")
     return nothing
 end
 
@@ -228,6 +216,7 @@ function select_initial_primal_weight(
         )
     return nothing
 end
+
 
 function update_step_size(problem::LinearProgramSet, step_size::CuArray{Float64}, dims::PDLPDims)
     GPU_blocks = Int32(CUDA.attribute(CUDA.device(), CUDA.DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT))
@@ -547,7 +536,7 @@ function add_multiple_LP_lower_bound(
 end
 
 
-function update_constant_step_size(problem::LinearProgramSet, step_size::CuArray{Float64}, dims::PDLPDims)
+function update_constant_step_size(problem::LinearProgramSet, step_size::CuArray{Float64}, guess_vector::CuArray{Float64}, new_vector::CuArray{Float64}, u_vec::CuArray{Float64}, dims::PDLPDims)
     # println("calculating step size using power iteration...")
     n_vars = dims.n_vars
     max_value = max(dims.current_LP_length, n_vars)
@@ -555,11 +544,7 @@ function update_constant_step_size(problem::LinearProgramSet, step_size::CuArray
 
     GPU_blocks = Int32(CUDA.attribute(CUDA.device(), CUDA.DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT))
     threads_per_block = 256 
-    iterations = Int32(5000) 
-    
-    guess_vector = CUDA.randn(Float64, dims.n_LPs, dims.n_vars)
-    u_vec = CUDA.zeros(Float64, dims.total_LP_length * dims.n_LPs)
-    new_vector = CUDA.zeros(Float64, dims.n_LPs, dims.n_vars)
+    iterations = Int32(5000)     
 
     CUDA.@sync @cuda blocks=GPU_blocks threads=threads_per_block shmem=shmem_bytes group_power_kernel(
         step_size, 

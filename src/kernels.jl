@@ -755,11 +755,12 @@ function primal_weight_kernel(
         end
 
         # And finally, calculate the primal importance and save it to the result
-        if obj_norm > 0.0 && rhs_norm > 0.0
-            result[idx] = sqrt(obj_norm)/sqrt(rhs_norm)
-        else
-            result[idx] = 1.0
-        end
+        # if obj_norm > 0.0 && rhs_norm > 0.0
+        #     result[idx] = sqrt(obj_norm)/sqrt(rhs_norm)
+        # else
+        #     result[idx] = 1.0
+        # end
+        result[idx] = (sqrt(obj_norm) + 1) / (sqrt(rhs_norm) + 1)
         idx += stride
     end
     return nothing
@@ -918,7 +919,6 @@ function group_power_kernel(
             # STEP 4: Compute Rayleigh quotient                     #
             # sigma_max_sq = guess_vector * next_vector             #
             #########################################################
-
 
             while idx <= n_vars
                 shared_space[idx] = new_vector[LP, idx] * guess_vector[LP, idx]

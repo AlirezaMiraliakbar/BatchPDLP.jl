@@ -32,9 +32,11 @@ function PDLP(
 
     # Validate the LP data we've been given to make sure the numbers are all valid and the dimensions
     # of participating matrices are correct
+    # println("Validating the PDLP_data...")
     validate(PDLP_data)
 
     # Reset all fields relevant to problem status
+    # println("Resetting all fields...")
     reset_all_fields!(PDLP_data)
 
     # Perform rescaling. Note that if hot-starting is to be added in the future, you should save all
@@ -46,6 +48,7 @@ function PDLP(
 
     # rescaling happens of original_problem -> ruiz_scaling (ruiz_var_kernel, ruiz_const_kernel, scale_problem) -> pock_chambolle -> scaled_problem
     # TODO: our constraint scaling stuff at ruiz_scaling happens inside scaling_part2_kernel that we are interesed in...
+    # println("Scaling the problem...")
     rescale_problem(
         PDLP_data.original_problem, 
         PDLP_data.scaled_problem, 
@@ -64,20 +67,37 @@ function PDLP(
     # end
 
     # calc_problem_norms(PDLP_data.scaled_problem)
+    # if PDLP_data.parameters.bound_objective_rescaling
+    #     println("bound rescaling is applied!")
+    #     PDLP_data.primal_weight .= 1.0
+    # elseif PDLP_data.parameters.scale_initial_primal_weight
+    #     select_initial_primal_weight(PDLP_data.primal_weight, PDLP_data.scaled_problem, PDLP_data.dims)
+    # else
+    #     PDLP_data.primal_weight .= 1.0
+    # end
+    # println("calculating primal weight...")
     if PDLP_data.parameters.bound_objective_rescaling
-        println("bound rescaling is applied!")
+
         PDLP_data.primal_weight .= 1.0
+
     elseif PDLP_data.parameters.scale_initial_primal_weight
-        select_initial_primal_weight(PDLP_data.primal_weight, PDLP_data.scaled_problem, PDLP_data.dims)
-    else
-        PDLP_data.primal_weight .= 1.0
+
+        select_initial_primal_weight(PDLP_data.primal_weight, PDLP_data.original_problem, PDLP_data.dims)
+    
     end
-
     # Come up with a starting step size (Could also put this inside the kernel)
-    update_constant_step_size(PDLP_data.scaled_problem, PDLP_data.step_size, PDLP_data.dims)
+    # println("calculating step size...")
+    println("guess vector = $(PDLP_data.kernel_storage.guess_vector)")
+    println("new vector = $(PDLP_data.kernel_storage.new_vector)")
+    println("u vector = $(PDLP_data.kernel_storage.u_vector)")
+    update_constant_step_size(PDLP_data.scaled_problem, 
+                              PDLP_data.step_size, 
+                              PDLP_data.kernel_storage.guess_vector .+1, 
+                              PDLP_data.kernel_storage.new_vector, 
+                              PDLP_data.kernel_storage.u_vector,
+                              PDLP_data.dims)
 
-    # display("BatchPDLPx Step size = $(PDLP_data.step_size), Primal Weight = $(PDLP_data.primal_weight)")
-    # error("avocado!")
+    println("Step size = $(PDLP_data.step_size), Primal Weight = $(PDLP_data.primal_weight)")
     # Run the main loop kernel
     max_size = max(PDLP_data.dims.n_vars, PDLP_data.dims.current_LP_length)
     max_req = Int32(min(256, max(32, ceil(Int, max_size/32)*32))) # number of threads per LP based on LP size
@@ -85,7 +105,7 @@ function PDLP(
     # Reset total solve and iteration number counters
     PDLP_data.global_counter .= Int32(0)
     PDLP_data.iteration_counter .= Int32(0)
-    println("everything preconditioned and ready to solve...")
+    # println("Reached 1: about to get into main loop")    
     # Call the main PDLP kernel
     CUDA.@sync @cuda blocks=PDLP_data.dims.n_LPs threads=max_req shmem=max_size*sizeof(Float64) main_loop_kernel(
             solutions,
@@ -150,6 +170,7 @@ function PDLP(
             PDLP_data.parameters.pid_KP,
             PDLP_data.parameters.pid_KI,
             PDLP_data.parameters.pid_KD,
+            PDLP_data.parameters.i_smooth,
             PDLP_data.parameters.termination_criteria.eps_optimal_absolute,
             PDLP_data.parameters.termination_criteria.eps_optimal_relative,
             PDLP_data.parameters.termination_criteria.eps_primal_infeasible,
