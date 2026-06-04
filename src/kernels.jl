@@ -543,8 +543,8 @@ function ruiz_constraint_kernel(
 
     idx = threadIdx().x + (blockIdx().x - Int32(1)) * blockDim().x
     stride = blockDim().x * gridDim().x
-    len = Int32(size(constraint_matrix, 1))
-    width = Int32(size(constraint_matrix, 2))
+    len = Int32(size(constraint_matrix, 1)) # number of constraints
+    width = Int32(size(constraint_matrix, 2)) # number of variables
 
     # For each row of the constraint matrix, get the maximum value of the absolute 
     # values of the elements in that row, and set the result storage to the sqrt of 
@@ -562,7 +562,7 @@ function ruiz_constraint_kernel(
             maxval = max(abs(constraint_matrix[new_ID, col]), maxval)
             col += Int32(1)
         end
-        if iszero(maxval)
+        if maxval < 1e-12
             maxval = 1.0
         end
         result_storage[new_ID] = sqrt(maxval)
@@ -956,9 +956,36 @@ function group_power_kernel(
         # Compute step size: tau = 0.998 / sqrt(sigma_max_sq)
         if idx == 1
             result[LP] = 0.998 / sqrt(sigma_max_sq)
-            # result[LP] = 1.245079497775949e+00
+            # result[LP] = 1.220128290819172e+00
         end
         LP += grid_stride
     end
     return nothing
+end
+
+function compute_bound_contrib_kernel(
+    results,
+    right_hand_side,
+    total_LP_length,
+)
+
+    idx = threadIdx().x + (blockIdx().x - Int32(1)) * blockDim().x
+    stride = blockDim().x * gridDim().x
+
+    while idx <= total_LP_length
+        Li = right_hand_side[idx]
+        acc = 0.0 
+        
+        # Since there are no upper bounds, we only check if the lower bound (RHS) is finite.
+        if isfinite(Li)
+            acc += Li * Li
+        end
+        
+        results[idx] = acc
+        
+        # CRITICAL: Advance the index to prevent an infinite loop
+        idx += stride
+    end
+    
+    return nothing 
 end

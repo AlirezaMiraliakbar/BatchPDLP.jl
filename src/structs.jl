@@ -62,6 +62,8 @@ mutable struct LinearProgramSet
     right_hand_side::CuArray{Float64}
     objective_vector::CuArray{Float64}
     objective_constant::CuArray{Float64}
+    objective_vector_norm::Float64
+    constraint_bound_norm::Float64
 end
 import Base.copyto!
 function copyto!(to::LinearProgramSet, from::LinearProgramSet)
@@ -152,6 +154,9 @@ mutable struct KernelStorage
     initial_dual_solution::CuArray{Float64} 
     pdhg_primal_solution::CuArray{Float64} 
     pdhg_dual_solution::CuArray{Float64} 
+    reflected_primal_solution::CuArray{Float64}
+    reflected_dual_solution::CuArray{Float64}
+    dual_slack::CuArray{Float64}
     original_primal_solution::CuArray{Float64}
     original_primal_gradient::CuArray{Float64} 
     original_dual_solution::CuArray{Float64} 
@@ -164,8 +169,6 @@ mutable struct KernelStorage
     delta_primal::CuArray{Float64}
     delta_primal_product::CuArray{Float64}
     delta_dual::CuArray{Float64}
-    delta_primal_halpern::CuArray{Float64}
-    delta_dual_halpern::CuArray{Float64}
 end
 
 
@@ -173,6 +176,7 @@ mutable struct PDLPParams
     ruiz_iterations::Int
     pock_chambolle_alpha::Union{Nothing,Float64}
     scale_initial_primal_weight::Bool
+    bound_objective_rescaling::Bool
     extrapolation_coefficient::Float64
     reflection_coefficient::Float64
     kkt_matrix_pass_limit::Float64
@@ -252,7 +256,7 @@ function PDLPData(
     extrapolation_coefficient::Float64 = 1.0,
     reflection_coefficient::Float64 = 1.0,
     kkt_matrix_pass_limit::Float64 = Inf,
-    termination_evaluation_frequency::Int64 = 1000,
+    termination_evaluation_frequency::Int64 = 200,
     necessary_reduction_for_restart::Float64 = 0.5,
     sufficient_reduction_for_restart::Float64 = 0.2,
     artificial_ratio_for_restart::Float64 = 0.36,
@@ -272,14 +276,18 @@ function PDLPData(
             CUDA.zeros(Float64, total_LP_length * n_LPs, n_vars),
             CUDA.zeros(Float64, total_LP_length * n_LPs),
             CUDA.zeros(Float64, n_LPs, n_vars),
-            CUDA.zeros(Float64, n_LPs)),
+            CUDA.zeros(Float64, n_LPs),
+            0.0,
+            0.0),
         LinearProgramSet( # Scaled LPs
             CUDA.zeros(Float64, n_LPs, n_vars),
             CUDA.zeros(Float64, n_LPs, n_vars),
             CUDA.zeros(Float64, total_LP_length * n_LPs, n_vars),
             CUDA.zeros(Float64, total_LP_length * n_LPs),
             CUDA.zeros(Float64, n_LPs, n_vars),
-            CUDA.zeros(Float64, n_LPs)),
+            CUDA.zeros(Float64, n_LPs),
+            0.0,
+            0.0),
         PDLPSparsity(
             nz,
             nz_rows,
@@ -300,6 +308,9 @@ function PDLPData(
             CUDA.zeros(Float64, total_LP_length * n_LPs), 
             CUDA.zeros(Float64, n_LPs, n_vars), 
             CUDA.zeros(Float64, total_LP_length * n_LPs), 
+            CUDA.zeros(Float64, n_LPs, n_vars),
+            CUDA.zeros(Float64, total_LP_length * n_LPs),
+            CUDA.zeros(Float64, n_LPs, n_vars),
             CUDA.zeros(Float64, n_LPs, n_vars), 
             CUDA.zeros(Float64, n_LPs, n_vars), 
             CUDA.zeros(Float64, total_LP_length * n_LPs), 
@@ -312,13 +323,12 @@ function PDLPData(
             CUDA.zeros(Float64, n_LPs, n_vars), 
             CUDA.zeros(Float64, total_LP_length * n_LPs),
             CUDA.zeros(Float64, total_LP_length * n_LPs),
-            CUDA.zeros(Float64, n_LPs, n_vars),
-            CUDA.zeros(Float64, total_LP_length * n_LPs)
         ),
         PDLPParams( # Parameters
             10,                               # Iterations for Ruiz rescaling
             1.0,                              # Alpha for Pock Chambolle rescaling
             true,                             # Scale initial primal weight flag
+            false,                             # Bound Objective Rescaling flag
             extrapolation_coefficient,        # Extrapolation coefficient used for taking steps
             reflection_coefficient,           # Reflection Coefficient for Halpern Scheme
             kkt_matrix_pass_limit,            # Limit for KKT matrix passes (default Inf)

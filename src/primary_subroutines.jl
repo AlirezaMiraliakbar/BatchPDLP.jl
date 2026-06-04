@@ -43,6 +43,9 @@ function PDLP(
     # previous run, then do re-scaling, then scale the primal/dual statuses again. This will also
     # require adding storage for these values, and un-commenting some lines in `main_loop.jl`
     # to allow hot-starting to impact the main PDLP algorithm. 
+
+    # rescaling happens of original_problem -> ruiz_scaling (ruiz_var_kernel, ruiz_const_kernel, scale_problem) -> pock_chambolle -> scaled_problem
+    # TODO: our constraint scaling stuff at ruiz_scaling happens inside scaling_part2_kernel that we are interesed in...
     rescale_problem(
         PDLP_data.original_problem, 
         PDLP_data.scaled_problem, 
@@ -55,14 +58,25 @@ function PDLP(
     # Scale the primal weight if desired (otherwise it should be 1.0)
     # (Could also put this inside the main kernel)
     # if PDLP_data.parameters.scale_initial_primal_weight
-        # select_initial_primal_weight(PDLP_data.primal_weight, PDLP_data.scaled_problem, PDLP_data.dims)
+    #     select_initial_primal_weight(PDLP_data.primal_weight, PDLP_data.scaled_problem, PDLP_data.dims)
     # else
-        
+    #     PDLP_data.primal_weight .= 1.0
     # end
-    PDLP_data.primal_weight .= 1.0
+
+    # calc_problem_norms(PDLP_data.scaled_problem)
+    if PDLP_data.parameters.bound_objective_rescaling
+        println("bound rescaling is applied!")
+        PDLP_data.primal_weight .= 1.0
+    elseif PDLP_data.parameters.scale_initial_primal_weight
+        select_initial_primal_weight(PDLP_data.primal_weight, PDLP_data.scaled_problem, PDLP_data.dims)
+    else
+        PDLP_data.primal_weight .= 1.0
+    end
+
     # Come up with a starting step size (Could also put this inside the kernel)
     update_constant_step_size(PDLP_data.scaled_problem, PDLP_data.step_size, PDLP_data.dims)
-    display("BatchPDLPx Step size = $(PDLP_data.step_size), Primal Weight = $(PDLP_data.primal_weight)")
+
+    # display("BatchPDLPx Step size = $(PDLP_data.step_size), Primal Weight = $(PDLP_data.primal_weight)")
     # error("avocado!")
     # Run the main loop kernel
     max_size = max(PDLP_data.dims.n_vars, PDLP_data.dims.current_LP_length)
@@ -71,7 +85,7 @@ function PDLP(
     # Reset total solve and iteration number counters
     PDLP_data.global_counter .= Int32(0)
     PDLP_data.iteration_counter .= Int32(0)
-
+    println("everything preconditioned and ready to solve...")
     # Call the main PDLP kernel
     CUDA.@sync @cuda blocks=PDLP_data.dims.n_LPs threads=max_req shmem=max_size*sizeof(Float64) main_loop_kernel(
             solutions,
@@ -86,6 +100,8 @@ function PDLP(
             PDLP_data.scaled_problem.constraint_matrix,
             PDLP_data.scaled_problem.right_hand_side,
             PDLP_data.scaled_problem.objective_vector,
+            PDLP_data.scaled_problem.objective_vector_norm,
+            PDLP_data.scaled_problem.constraint_bound_norm,
             PDLP_data.sparsity.nz_count[PDLP_data.dims.current_LP_length],
             PDLP_data.sparsity.nz_rows,
             PDLP_data.sparsity.nz_cols,
@@ -101,6 +117,9 @@ function PDLP(
             PDLP_data.kernel_storage.initial_dual_solution,
             PDLP_data.kernel_storage.pdhg_primal_solution,
             PDLP_data.kernel_storage.pdhg_dual_solution,
+            PDLP_data.kernel_storage.reflected_primal_solution, # 10
+            PDLP_data.kernel_storage.reflected_dual_solution, # 11
+            PDLP_data.kernel_storage.dual_slack, # 12
             PDLP_data.kernel_storage.original_primal_solution,
             PDLP_data.kernel_storage.original_primal_gradient,
             PDLP_data.kernel_storage.original_dual_solution,
@@ -225,6 +244,13 @@ function rescale_problem(
             )
     end
 
+    # println("constraint rescaling after ruiz is = $(constraint_rescaling)")
+    # println(" constraint matrix after ruiz scaling: ")
+    # println(scaled_problem.constraint_matrix)
+    # println("So far scaled constraint matrix is aligned with cuPDLPx...")
+    # println(" right hand side after ruiz scaling: ")
+    # println(scaled_problem.right_hand_side)
+    # println("So far scaled constraint matrix is aligned with cuPDLPx...")
     # cuPDLP also has a section for l2 norm rescaling, but it's off by default, so
     # I haven't included it here
 
@@ -238,6 +264,26 @@ function rescale_problem(
             dims,
             )
     end
+    # println("--------------------------------------------------------------------------")
+    # println("")
+    # println(" constraint matrix after pock-chambolle scaling: ")
+    # println(scaled_problem.constraint_matrix)
+    # println("So far scaled constraint matrix is aligned with cuPDLPx...")
+    # println(" right hand side after pock-chambolle scaling: ")
+    # println(scaled_problem.right_hand_side)
+    # println("So far scaled constraint matrix is aligned with cuPDLPx...")
+    # # error("avocado")
+
+    if (params.bound_objective_rescaling) # Default is false
+
+        bound_objective_rescaling(
+            scaled_problem, 
+            variable_rescaling, 
+            constraint_rescaling,  
+            dims,
+            )
+    end
+
     
     return nothing
 end
@@ -251,3 +297,28 @@ function reset_all_fields!(PDLP_data::PDLPData)
     # Reset the termination indicator
     CUDA.fill!(PDLP_data.termination_reason, TERMINATION_REASON_UNSPECIFIED)
 end
+
+# function calc_problem_norms(problem::LinearProgramSet, dims::PDLPDims)
+
+#     right_hand_side = problem.right_hand_side
+#     obj_vec = problem.objective_vector
+    
+#     const_norm = problem.constraint_bound_norm
+#     obj_vec_norm = problem.objective_vector_norm
+
+#     n_vars = dims.n_vars
+
+#     # Identify the number of blocks to use
+#     GPU_blocks = Int32(CUDA.attribute(CUDA.device(), CUDA.DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT))
+
+#     CUDA.@sync @cuda blocks=GPU_blocks threads=512 get_norm(right_hand_side, const_norm)
+
+#     CUDA.@sync @cuda blocks=GPU_blocks threads=512 get_norm(obj_vec, obj_vec_norm)
+
+    
+#     return nothing
+# end
+
+# function get_norm(arr::CuArray{Float64}, norm::Float64)
+#     idx = threadIdx().x
+# end

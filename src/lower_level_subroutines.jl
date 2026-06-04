@@ -2,13 +2,13 @@
 # Rescaling and update functions called from `primal_subroutines.jl`. These
 # are generally based on cuPDLP.jl.
 function ruiz_rescaling(
-    problem::LinearProgramSet, 
+    problem::LinearProgramSet, # problem that is being fed here is original problem technically
     n_iterations::Int, 
     variable_rescaling::CuArray{Float64}, 
     constraint_rescaling::CuArray{Float64},  
     dims::PDLPDims,
     )
-
+    
     # Identify the number of blocks to use
     GPU_blocks = Int32(CUDA.attribute(CUDA.device(), CUDA.DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT))
 
@@ -16,7 +16,7 @@ function ruiz_rescaling(
     temp_variable_rescaling = CuArray{Float64}(undef, size(variable_rescaling))
     temp_constraint_rescaling = CuArray{Float64}(undef, size(constraint_rescaling))
 
-    for _ in 1:n_iterations
+    for j in 1:n_iterations
         # Variable rescaling. sqrt of the maximum value of each column in each LP
         CUDA.@sync @cuda blocks=GPU_blocks threads=512 ruiz_variable_kernel(
             temp_variable_rescaling, 
@@ -24,15 +24,20 @@ function ruiz_rescaling(
             dims.current_LP_length, 
             dims.total_LP_length
             )
+        # we got temp_variable_rescaling from ruiz_variable_kernel 
 
         # Constraint resscaling. sqrt of the maximum value of each row of the constraint matrix
         CUDA.@sync @cuda blocks=GPU_blocks threads=512 ruiz_constraint_kernel(
-            temp_constraint_rescaling, 
-            problem.constraint_matrix, 
-            dims.current_LP_length, 
-            dims.total_LP_length
+            temp_constraint_rescaling, # result_storage
+            problem.constraint_matrix, # constraint_matrix
+            dims.current_LP_length, # current_LP_length
+            dims.total_LP_length # total_LP_length
             )
-
+        # we got temp_constraint_rescaling from ruiz_constraint_kernel 
+        
+        
+            
+        
         # Use the variable and constraint rescaling values to scale the problem
         scale_problem(
             problem, 
@@ -44,6 +49,8 @@ function ruiz_rescaling(
         # Update the overall rescaling variables
         variable_rescaling .*= temp_variable_rescaling
         constraint_rescaling .*= temp_constraint_rescaling
+
+        
     end
 
     # Free up temporary variables
@@ -53,7 +60,7 @@ function ruiz_rescaling(
 end
 
 function pock_chambolle_rescaling(
-    problem::LinearProgramSet, 
+    problem::LinearProgramSet, # the scaled problem from ruiz method is fed here
     alpha::Float64, 
     variable_rescaling::CuArray{Float64}, 
     constraint_rescaling::CuArray{Float64},  
@@ -98,6 +105,67 @@ function pock_chambolle_rescaling(
     # Free up temporary variables
     CUDA.unsafe_free!(temp_variable_rescaling)
     CUDA.unsafe_free!(temp_constraint_rescaling)
+    return nothing
+end
+
+function bound_objective_rescaling(
+    problem::LinearProgramSet, # the scaled problem from pock-chambolle method is fed here
+    variable_rescaling::CuArray{Float64}, 
+    constraint_rescaling::CuArray{Float64},  
+    dims::PDLPDims,
+    )
+    GPU_blocks = Int32(CUDA.attribute(CUDA.device(), CUDA.DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT))
+    
+    contrib = CUDA.zeros(Float64, dims.total_LP_length)
+
+    CUDA.@sync @cuda blocks= GPU_blocks threads = 512 compute_bound_contrib_kernel(
+        contrib, 
+        problem.right_hand_side, 
+        dims.total_LP_length, 
+    )
+
+    # println("contribution is calculated as: \n")
+    # println(contrib)
+    # println("we are golden at contrib")
+
+    # 2. Calculate the norms
+    # sum(contrib) directly replaces the complex cub::DeviceReduce block
+    bnd_norm = sqrt(sum(contrib))
+    
+    # norm() natively dispatches to cuBLAS cublasDnrm2 for CuArrays
+    obj_norm = CUDA.norm(problem.objective_vector)
+
+    # 3. Calculate scaling factors
+    constraint_scale = 1.0 / (bnd_norm + 1.0)
+    objective_scale = 1.0 / (obj_norm + 1.0)
+
+    problem.constraint_bound_norm = bnd_norm
+    problem.objective_vector_norm = obj_norm
+
+    # 4. Apply scales
+    # We use Julia's dot-broadcasting (.*=) instead of writing explicit scale_bounds_kernel
+    # and scale_objective_kernel. CUDA.jl automatically fuses these into optimized kernels.
+    
+    # Primal-space bounds (scaled by constraint_scale)
+    problem.right_hand_side         .*= constraint_scale
+    problem.variable_lower_bounds    .*= constraint_scale
+    problem.variable_upper_bounds    .*= constraint_scale
+    # problem.initial_primal_solution .*= constraint_scale
+    constraint_rescaling .= constraint_scale
+    variable_rescaling   .= constraint_scale
+    # Dual-space & Objective (scaled by objective_scale)
+    # problem.initial_dual_solution   .*= objective_scale
+    problem.objective_vector        .*= objective_scale
+    problem.objective_constant      .*= objective_scale
+
+    # println("Scaled Right Hand Side: \n")
+    # println(problem.right_hand_side)
+    # println("we are golden at right hand side")
+
+    # println("Scaled Objective Vector: \n")
+    # println(problem.objective_vector)
+
+    # error("avocado")
     return nothing
 end
 
