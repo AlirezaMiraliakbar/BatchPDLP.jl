@@ -98,6 +98,8 @@ function pock_chambolle_rescaling(
         dims
         )
 
+    
+
     # Update the overall rescaling variables
     variable_rescaling .*= temp_variable_rescaling
     constraint_rescaling .*= temp_constraint_rescaling
@@ -550,6 +552,7 @@ function update_constant_step_size(problem::LinearProgramSet, step_size::CuArray
         step_size, 
         problem.constraint_matrix, 
         dims.n_LPs, 
+        dims.n_vars,
         dims.total_LP_length, 
         dims.current_LP_length,
         u_vec,  

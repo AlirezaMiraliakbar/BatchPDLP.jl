@@ -29,14 +29,36 @@ function PDLP(
             error("Objective storage sized incorrectly")
         end
     end
+    
+    # println("total LP length = $(PDLP_data.dims.total_LP_length)")
+    # LP = 56
+    # println("constriant matrix LP $LP: \n")
+    # total_LP_length = PDLP_data.dims.total_LP_length
+    # LP_section = 1 + (LP - 1) * total_LP_length : LP * total_LP_length
+    # println(PDLP_data.original_problem.constraint_matrix[LP_section,:])
 
+    # println("variable lower bounds of $LP: \n")
+    # println(PDLP_data.original_problem.variable_lower_bounds[LP, :])
+
+    # println("variable upper bounds of $LP: \n")
+    # println(PDLP_data.original_problem.variable_upper_bounds[LP, :])
+    # # println(size(PDLP_data.original_problem.variable_upper_bounds))
+    # println("right hand side $LP: \n")
+    # println(PDLP_data.original_problem.right_hand_side[LP_section])
+
+    # println("objective vector $LP: \n")
+    # println(PDLP_data.original_problem.objective_vector[LP, :])
+
+    # println("objective constant $LP: \n")
+    # println(PDLP_data.original_problem.objective_constant[LP, :])
+    # error()   
     # Validate the LP data we've been given to make sure the numbers are all valid and the dimensions
     # of participating matrices are correct
-    # println("Validating the PDLP_data...")
+    println("Validating the PDLP_data...")
     validate(PDLP_data)
 
     # Reset all fields relevant to problem status
-    # println("Resetting all fields...")
+    println("Resetting all fields...")
     reset_all_fields!(PDLP_data)
 
     # Perform rescaling. Note that if hot-starting is to be added in the future, you should save all
@@ -48,7 +70,7 @@ function PDLP(
 
     # rescaling happens of original_problem -> ruiz_scaling (ruiz_var_kernel, ruiz_const_kernel, scale_problem) -> pock_chambolle -> scaled_problem
     # TODO: our constraint scaling stuff at ruiz_scaling happens inside scaling_part2_kernel that we are interesed in...
-    # println("Scaling the problem...")
+    println("Scaling the problem...")
     rescale_problem(
         PDLP_data.original_problem, 
         PDLP_data.scaled_problem, 
@@ -59,23 +81,7 @@ function PDLP(
         )
 
     # Scale the primal weight if desired (otherwise it should be 1.0)
-    # (Could also put this inside the main kernel)
-    # if PDLP_data.parameters.scale_initial_primal_weight
-    #     select_initial_primal_weight(PDLP_data.primal_weight, PDLP_data.scaled_problem, PDLP_data.dims)
-    # else
-    #     PDLP_data.primal_weight .= 1.0
-    # end
-
-    # calc_problem_norms(PDLP_data.scaled_problem)
-    # if PDLP_data.parameters.bound_objective_rescaling
-    #     println("bound rescaling is applied!")
-    #     PDLP_data.primal_weight .= 1.0
-    # elseif PDLP_data.parameters.scale_initial_primal_weight
-    #     select_initial_primal_weight(PDLP_data.primal_weight, PDLP_data.scaled_problem, PDLP_data.dims)
-    # else
-    #     PDLP_data.primal_weight .= 1.0
-    # end
-    # println("calculating primal weight...")
+    println("calculating primal weight...")
     if PDLP_data.parameters.bound_objective_rescaling
 
         PDLP_data.primal_weight .= 1.0
@@ -86,18 +92,21 @@ function PDLP(
     
     end
     # Come up with a starting step size (Could also put this inside the kernel)
-    # println("calculating step size...")
-    println("guess vector = $(PDLP_data.kernel_storage.guess_vector)")
-    println("new vector = $(PDLP_data.kernel_storage.new_vector)")
-    println("u vector = $(PDLP_data.kernel_storage.u_vector)")
+    println("calculating step size...")
+    # println("guess vector = $(PDLP_data.kernel_storage.guess_vector)")
+    # println("new vector = $(PDLP_data.kernel_storage.new_vector)")
+    # println("u vector = $(PDLP_data.kernel_storage.u_vector)")
     update_constant_step_size(PDLP_data.scaled_problem, 
                               PDLP_data.step_size, 
-                              PDLP_data.kernel_storage.guess_vector .+1, 
+                              PDLP_data.kernel_storage.guess_vector, 
                               PDLP_data.kernel_storage.new_vector, 
                               PDLP_data.kernel_storage.u_vector,
                               PDLP_data.dims)
-
-    println("Step size = $(PDLP_data.step_size), Primal Weight = $(PDLP_data.primal_weight)")
+    
+    # println("Step size = $(PDLP_data.step_size)")
+    # error("avocado!")
+    
+    # println("Primal Weight = $(PDLP_data.primal_weight)")
     # Run the main loop kernel
     max_size = max(PDLP_data.dims.n_vars, PDLP_data.dims.current_LP_length)
     max_req = Int32(min(256, max(32, ceil(Int, max_size/32)*32))) # number of threads per LP based on LP size
@@ -105,7 +114,8 @@ function PDLP(
     # Reset total solve and iteration number counters
     PDLP_data.global_counter .= Int32(0)
     PDLP_data.iteration_counter .= Int32(0)
-    # println("Reached 1: about to get into main loop")    
+    println("Reached 1: about to get into main loop")    
+    
     # Call the main PDLP kernel
     CUDA.@sync @cuda blocks=PDLP_data.dims.n_LPs threads=max_req shmem=max_size*sizeof(Float64) main_loop_kernel(
             solutions,
@@ -140,6 +150,11 @@ function PDLP(
             PDLP_data.kernel_storage.reflected_primal_solution, # 10
             PDLP_data.kernel_storage.reflected_dual_solution, # 11
             PDLP_data.kernel_storage.dual_slack, # 12
+            PDLP_data.kernel_storage.residual_primal_product, 
+            PDLP_data.kernel_storage.residual_dual_product,
+            PDLP_data.kernel_storage.primal_residual,
+            PDLP_data.kernel_storage.primal_slack,
+            PDLP_data.kernel_storage.dual_residual,
             PDLP_data.kernel_storage.original_primal_solution,
             PDLP_data.kernel_storage.original_primal_gradient,
             PDLP_data.kernel_storage.original_dual_solution,
@@ -295,15 +310,15 @@ function rescale_problem(
     # println("So far scaled constraint matrix is aligned with cuPDLPx...")
     # # error("avocado")
 
-    if (params.bound_objective_rescaling) # Default is false
+    # if (params.bound_objective_rescaling) # Default is false
 
-        bound_objective_rescaling(
-            scaled_problem, 
-            variable_rescaling, 
-            constraint_rescaling,  
-            dims,
-            )
-    end
+    #     bound_objective_rescaling(
+    #         scaled_problem, 
+    #         variable_rescaling, 
+    #         constraint_rescaling,  
+    #         dims,
+    #         )
+    # end
 
     
     return nothing
@@ -312,6 +327,9 @@ end
 function reset_all_fields!(PDLP_data::PDLPData)
     # Reset all kernel storage
     for field in fieldnames(KernelStorage)
+        if field == :guess_vector
+           continue
+        end
         CUDA.fill!(getfield(PDLP_data.kernel_storage, field), 0.0)
     end
 

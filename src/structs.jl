@@ -157,6 +157,11 @@ mutable struct KernelStorage
     reflected_primal_solution::CuArray{Float64}
     reflected_dual_solution::CuArray{Float64}
     dual_slack::CuArray{Float64}
+    residual_primal_product::CuArray{Float64}
+    residual_dual_product::CuArray{Float64} 
+    primal_residual::CuArray{Float64}
+    primal_slack::CuArray{Float64}
+    dual_residual::CuArray{Float64}
     original_primal_solution::CuArray{Float64}
     original_primal_gradient::CuArray{Float64} 
     original_dual_solution::CuArray{Float64} 
@@ -256,11 +261,11 @@ function PDLPData(
     n_vars::Int, 
     total_LP_length::Int;
     sparsity::Matrix{Bool} = fill(true, total_LP_length, n_vars),
-    iteration_limit::Int = Int(typemax(Int32)),
+    iteration_limit::Int = 1000000, #Int(typemax(Int32)),
     extrapolation_coefficient::Float64 = 1.0,
     reflection_coefficient::Float64 = 1.0,
     kkt_matrix_pass_limit::Float64 = Inf,
-    termination_evaluation_frequency::Int64 = 3,
+    termination_evaluation_frequency::Int64 = 64,
     necessary_reduction_for_restart::Float64 = 0.5,
     sufficient_reduction_for_restart::Float64 = 0.2,
     artificial_ratio_for_restart::Float64 = 0.36,
@@ -316,6 +321,11 @@ function PDLPData(
             CUDA.zeros(Float64, n_LPs, n_vars),
             CUDA.zeros(Float64, total_LP_length * n_LPs),
             CUDA.zeros(Float64, n_LPs, n_vars),
+            CUDA.zeros(Float64, total_LP_length * n_LPs),
+            CUDA.zeros(Float64, n_LPs, n_vars),
+            CUDA.zeros(Float64, total_LP_length * n_LPs),
+            CUDA.zeros(Float64, total_LP_length * n_LPs),
+            CUDA.zeros(Float64, n_LPs, n_vars), 
             CUDA.zeros(Float64, n_LPs, n_vars), 
             CUDA.zeros(Float64, n_LPs, n_vars), 
             CUDA.zeros(Float64, total_LP_length * n_LPs), 
@@ -328,7 +338,7 @@ function PDLPData(
             CUDA.zeros(Float64, n_LPs, n_vars), 
             CUDA.zeros(Float64, total_LP_length * n_LPs),
             CUDA.zeros(Float64, total_LP_length * n_LPs),
-            CUDA.ones(Float64, n_LPs, n_vars),
+            CUDA.randn(Float64, n_LPs, n_vars),
             CUDA.zeros(Float64, n_LPs, n_vars),
             CUDA.zeros(Float64, total_LP_length * n_LPs)
         ),

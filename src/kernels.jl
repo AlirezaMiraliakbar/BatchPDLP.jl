@@ -594,6 +594,18 @@ function scaling_part1_kernel(
         end
         idx += stride
     end
+
+    # #updating objective_vector_norm and constraint_bound_norm
+    # @inbounds while idx <= len
+    #     var = Int32(1)
+    #     while var <= width
+    #         obj_vec_norm += objective_vector[idx, var]
+    #         constraint_bound_norm += variable_lower_bounds[idx, var] *= variable_rescaling[idx, var]
+    #         variable_upper_bounds[idx, var] *= variable_rescaling[idx, var]
+    #         var += Int32(1)
+    #     end
+    #     idx += stride
+    # end
     return nothing
 end
 
@@ -802,6 +814,7 @@ function group_power_kernel(
     result, # [n_LPs] - output step sizes
     matrix, 
     n_LPs, 
+    n_vars,
     total_LP_length, 
     current_LP_length,
     u_vec, # [n_LPs * total_LP_length] - intermediate: A·v
@@ -815,13 +828,8 @@ function group_power_kernel(
     grid_stride = gridDim().x
     block_stride = blockDim().x
     idx = threadIdx().x
-    
-    n_vars = size(matrix, 2)
 
-    max_value = max(current_LP_length, n_vars)
-
-
-    shared_space = @cuDynamicSharedMem(Float64, max_value)
+    shared_space = @cuDynamicSharedMem(Float64, max(current_LP_length, n_vars))
 
 
     var_stride = Int32(1) << floor(Int32, log2(n_vars))
@@ -850,6 +858,7 @@ function group_power_kernel(
             sync_threads()
 
             # Compute L2 norm of new_vector: ||new_vector||_2
+
             while idx <= n_vars
                 shared_space[idx] = new_vector[LP, idx] ^ 2
                 idx += block_stride
@@ -858,7 +867,7 @@ function group_power_kernel(
             parallel_sum(shared_space, block_stride, var_stride, n_vars)
             
             eigenvector_norm = sqrt(shared_space[1])
-            
+
             # Normalize: new_vector = new_vector / ||new_vector||_2
 
             while idx <= n_vars
@@ -940,9 +949,10 @@ function group_power_kernel(
                 idx += block_stride
             end
             idx = threadIdx().x
-            parallel_sum(shared_space, block_stride, len_stride, current_LP_length)
+            parallel_sum(shared_space, block_stride, var_stride, n_vars)
             
             residual_norm = sqrt(shared_space[1])
+
             sync_threads()
 
             # Check convergence
