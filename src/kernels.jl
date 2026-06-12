@@ -523,7 +523,7 @@ function ruiz_variable_kernel(
         end
 
         # Set the value to 1.0 if the maximum was zero.
-        if iszero(maxval)
+        if maxval < 1e-12
             maxval = 1.0
         end
 
@@ -594,18 +594,6 @@ function scaling_part1_kernel(
         end
         idx += stride
     end
-
-    # #updating objective_vector_norm and constraint_bound_norm
-    # @inbounds while idx <= len
-    #     var = Int32(1)
-    #     while var <= width
-    #         obj_vec_norm += objective_vector[idx, var]
-    #         constraint_bound_norm += variable_lower_bounds[idx, var] *= variable_rescaling[idx, var]
-    #         variable_upper_bounds[idx, var] *= variable_rescaling[idx, var]
-    #         var += Int32(1)
-    #     end
-    #     idx += stride
-    # end
     return nothing
 end
 
@@ -685,7 +673,7 @@ function pock_chambolle_variable_kernel(
         end
 
         # Set the value to 1.0 if the result was zero.
-        if iszero(result)
+        if result < 1e-12
             result = 1.0
         end
 
@@ -724,7 +712,7 @@ function pock_chambolle_constraint_kernel(
             result += abs(constraint_matrix[new_ID, col])^alpha
             col += Int32(1)
         end
-        if iszero(result)
+        if result < 1e-12
             result = 1.0
         end
         result_storage[new_ID] = sqrt(result)
@@ -767,12 +755,13 @@ function primal_weight_kernel(
         end
 
         # And finally, calculate the primal importance and save it to the result
-        # if obj_norm > 0.0 && rhs_norm > 0.0
-        #     result[idx] = sqrt(obj_norm)/sqrt(rhs_norm)
-        # else
-        #     result[idx] = 1.0
-        # end
-        result[idx] = (sqrt(obj_norm) + 1) / (sqrt(rhs_norm) + 1)
+        if obj_norm > 0.0 && rhs_norm > 0.0
+            # result[idx] = sqrt(obj_norm)/sqrt(rhs_norm)
+            result[idx] = (sqrt(obj_norm) + 1) / (sqrt(rhs_norm) + 1)
+        else
+            result[idx] = 1.0
+        end
+        
         idx += stride
     end
     return nothing
@@ -810,24 +799,192 @@ function group_max_kernel(
     return nothing
 end
 
+# function group_power_kernel(
+#     result, # [n_LPs] - output step sizes
+#     matrix, 
+#     n_LPs, 
+#     n_vars,
+#     total_LP_length, 
+#     current_LP_length,
+#     u_vec, # [n_LPs * total_LP_length] - intermediate: A·v
+#     guess_vector, # [n_LPs, n_vars] - current eigenvector
+#     new_vector, # [n_LPs, n_vars] - next eigenvector (A·A^T·v)
+#     iterations,
+#     tolerance
+#     )
+
+#     LP = blockIdx().x
+#     grid_stride = gridDim().x
+#     block_stride = blockDim().x
+#     idx = threadIdx().x
+
+#     shared_space = @cuDynamicSharedMem(Float64, max(current_LP_length, n_vars))
+
+
+#     var_stride = Int32(1) << floor(Int32, log2(n_vars))
+#     len_stride = Int32(1) << floor(Int32, log2(current_LP_length))
+
+#     while LP <= n_LPs
+        
+#         # LP-specific starting position in the 1D workspace array (1-based)
+#         active_row = (LP - Int32(1)) * total_LP_length
+
+#         iter = Int32(1)
+#         sigma_max_sq = 1.0
+        
+#         # Power iterations
+#         while iter <= iterations 
+
+#             #########################################################
+#             # STEP 1: Copy and normalize guess_vector to new_vector #
+#             #########################################################
+            
+#             while idx <= n_vars
+#                 new_vector[LP, idx] = guess_vector[LP, idx]
+#                 idx += block_stride
+#             end
+#             idx = threadIdx().x
+#             sync_threads()
+
+#             # Compute L2 norm of new_vector: ||new_vector||_2
+
+#             while idx <= n_vars
+#                 shared_space[idx] = new_vector[LP, idx] ^ 2
+#                 idx += block_stride
+#             end
+#             idx = threadIdx().x
+#             parallel_sum(shared_space, block_stride, var_stride, n_vars)
+            
+#             eigenvector_norm = sqrt(shared_space[1])
+
+#             # Normalize: new_vector = new_vector / ||new_vector||_2
+
+#             while idx <= n_vars
+#                 new_vector[LP, idx] = new_vector[LP, idx] / eigenvector_norm
+#                 idx += block_stride
+#             end
+
+#             idx = threadIdx().x
+#             sync_threads()
+
+#             ##############################################################################
+#             # STEP 2: Compute u_vec = A · new_vector ([m*1] = [m*n] x [n*1])       #
+#             ##############################################################################
+
+#             while idx <= current_LP_length
+#                 row_sum = 0.0   
+#                 col = Int32(1)
+
+#                 while col <= n_vars
+
+#                     matrix_value = matrix[active_row + idx, col]
+#                     v_value = new_vector[LP, col]
+#                     row_sum += matrix_value * v_value
+#                     col += Int32(1)
+#                 end
+
+#                 u_vec[active_row + idx] = row_sum
+            
+#                 idx += block_stride
+#             end
+#             idx = threadIdx().x
+#             sync_threads()
+
+#             ################################################################################
+#             # STEP 3: Compute guess_vector = A^T · u_vec ([n*1] = [n*m] x [m*1])     #
+#             ################################################################################
+
+#             while idx <= n_vars
+#                 col_sum = 0.0   
+#                 row = Int32(1)
+
+#                 while row <= current_LP_length
+#                     # 1-based indexing for matrix (row-th constraint, col-th variable)
+#                     matrix_value = matrix[active_row + row, idx]
+#                     u_value = u_vec[active_row + row]
+
+#                     col_sum += matrix_value * u_value
+#                     row += Int32(1)
+#                 end
+
+#                 guess_vector[LP, idx] = col_sum
+#                 idx += block_stride
+#             end
+#             idx = threadIdx().x
+#             sync_threads()
+
+#             #########################################################
+#             # STEP 4: Compute Rayleigh quotient                     #
+#             # sigma_max_sq = guess_vector * next_vector             #
+#             #########################################################
+
+#             while idx <= n_vars
+#                 shared_space[idx] = new_vector[LP, idx] * guess_vector[LP, idx]
+#                 idx += block_stride
+#             end
+#             idx = threadIdx().x
+#             parallel_sum(shared_space, block_stride, var_stride, n_vars)
+            
+#             sigma_max_sq = shared_space[1]
+#             sync_threads()
+
+#             #########################################################
+#             # STEP 5: Compute residual for convergence check        #
+#             # residual = guess_vector - sigma_max_sq * new_vector   #
+#             #########################################################
+
+#             while idx <= n_vars
+#                 shared_space[idx] = (guess_vector[LP, idx] - sigma_max_sq * new_vector[LP, idx]) ^ 2
+#                 idx += block_stride
+#             end
+#             idx = threadIdx().x
+#             parallel_sum(shared_space, block_stride, var_stride, n_vars)
+            
+#             residual_norm = sqrt(shared_space[1])
+
+#             sync_threads()
+
+#             # Check convergence
+#             if residual_norm < tolerance
+#                 break
+#             end
+
+#             iter += Int32(1)
+#         end
+        
+#         # Compute step size: tau = 0.998 / sqrt(sigma_max_sq)
+#         if idx == 1
+#             result[LP] = 0.998 / sqrt(sigma_max_sq)
+            
+#         end
+#         LP += grid_stride
+#     end
+#     return nothing
+# end
+
 function group_power_kernel(
     result, # [n_LPs] - output step sizes
     matrix, 
     n_LPs, 
     n_vars,
+    nz_count,
+    nz_rows,
+    nz_cols,
+    active_constraint,
     total_LP_length, 
     current_LP_length,
-    u_vec, # [n_LPs * total_LP_length] - intermediate: A·v
-    guess_vector, # [n_LPs, n_vars] - current eigenvector
-    new_vector, # [n_LPs, n_vars] - next eigenvector (A·A^T·v)
+    u_vec, # [n_LPs, n_vars] - intermediate: A·v
+    eigenvector_d, # [n_LPs * total_LP_length] - current eigenvector
+    new_eigenvector_d, # [n_LPs * total_LP_length] - next eigenvector (A·A^T·v)
     iterations,
     tolerance
     )
 
     LP = blockIdx().x
-    grid_stride = gridDim().x
-    block_stride = blockDim().x
     idx = threadIdx().x
+
+    block_stride = blockDim().x
+    grid_stride = gridDim().x
 
     shared_space = @cuDynamicSharedMem(Float64, max(current_LP_length, n_vars))
 
@@ -849,78 +1006,83 @@ function group_power_kernel(
             #########################################################
             # STEP 1: Copy and normalize guess_vector to new_vector #
             #########################################################
-            
-            while idx <= n_vars
-                new_vector[LP, idx] = guess_vector[LP, idx]
+            # Copy eigenvector_d into new_eigenvector_d
+            while idx <= current_LP_length
+                new_eigenvector_d[active_row + idx] = eigenvector_d[active_row + idx]
                 idx += block_stride
             end
             idx = threadIdx().x
             sync_threads()
 
-            # Compute L2 norm of new_vector: ||new_vector||_2
-
-            while idx <= n_vars
-                shared_space[idx] = new_vector[LP, idx] ^ 2
-                idx += block_stride
-            end
-            idx = threadIdx().x
-            parallel_sum(shared_space, block_stride, var_stride, n_vars)
-            
-            eigenvector_norm = sqrt(shared_space[1])
-
-            # Normalize: new_vector = new_vector / ||new_vector||_2
-
-            while idx <= n_vars
-                new_vector[LP, idx] = new_vector[LP, idx] / eigenvector_norm
-                idx += block_stride
-            end
-
-            idx = threadIdx().x
-            sync_threads()
-
-            ##############################################################################
-            # STEP 2: Compute u_vec = A · new_vector ([m*1] = [m*n] x [n*1])       #
-            ##############################################################################
+            # Compute L2 norm of new_eigenvector_d: ||new_eigenvector_d||_2
 
             while idx <= current_LP_length
-                row_sum = 0.0   
-                col = Int32(1)
-
-                while col <= n_vars
-
-                    matrix_value = matrix[active_row + idx, col]
-                    v_value = new_vector[LP, col]
-                    row_sum += matrix_value * v_value
-                    col += Int32(1)
-                end
-
-                u_vec[active_row + idx] = row_sum
+                shared_space[idx] = new_eigenvector_d[active_row + idx] ^ 2
+                idx += block_stride
+            end
+            idx = threadIdx().x
+            parallel_sum(shared_space, block_stride, len_stride, current_LP_length)
             
+            eigenvector_norm = sqrt(shared_space[1])
+            inv_eigenvector_norm = 1 / eigenvector_norm
+            # Normalize: new_vector = new_vector / ||new_vector||_2
+
+            while idx <= current_LP_length
+                new_eigenvector_d[active_row + idx] =  new_eigenvector_d[active_row + idx] * inv_eigenvector_norm
+                idx += block_stride
+            end
+
+            idx = threadIdx().x
+            sync_threads()
+
+            ##############################################################################
+            # STEP 2: Compute u_vec = A^T * new_eigenvector_d ([n*1] = [n*m] x [m*1])    #
+            ##############################################################################
+
+            while idx <= n_vars 
+                shared_space[idx] = 0.0
+                idx += block_stride
+            end
+            idx = threadIdx().x
+            while idx <= nz_count
+                if active_constraint[active_row + nz_rows[idx]]
+                    CUDA.atomic_add!(CUDA.pointer(shared_space, nz_cols[idx]), matrix[active_row + nz_rows[idx], nz_cols[idx]] * new_eigenvector_d[active_row + nz_rows[idx]])
+                end
+                idx += block_stride
+            end
+            idx = threadIdx().x
+            sync_threads()
+
+            while idx <= n_vars
+                u_vec[LP, idx] = shared_space[idx]
                 idx += block_stride
             end
             idx = threadIdx().x
             sync_threads()
 
             ################################################################################
-            # STEP 3: Compute guess_vector = A^T · u_vec ([n*1] = [n*m] x [m*1])     #
+            # STEP 3: Compute eigenvector_d = A * u_vec ([m*1] = [m*n] x [n*1])            #
             ################################################################################
 
-            while idx <= n_vars
-                col_sum = 0.0   
-                row = Int32(1)
-
-                while row <= current_LP_length
-                    # 1-based indexing for matrix (row-th constraint, col-th variable)
-                    matrix_value = matrix[active_row + row, idx]
-                    u_value = u_vec[active_row + row]
-
-                    col_sum += matrix_value * u_value
-                    row += Int32(1)
-                end
-
-                guess_vector[LP, idx] = col_sum
+            while idx <= current_LP_length 
+                shared_space[idx] = 0.0
                 idx += block_stride
             end
+            idx = threadIdx().x
+            while idx <= nz_count
+                if active_constraint[active_row + nz_rows[idx]]
+                    CUDA.atomic_add!(CUDA.pointer(shared_space, nz_rows[idx]), matrix[active_row + nz_rows[idx], nz_cols[idx]] * u_vec[LP, nz_cols[idx]])
+                end
+                idx += block_stride
+            end
+            idx = threadIdx().x
+            sync_threads()
+
+            while idx <= current_LP_length
+                eigenvector_d[active_row + idx] = shared_space[idx]
+                idx += block_stride
+            end
+            
             idx = threadIdx().x
             sync_threads()
 
@@ -929,12 +1091,12 @@ function group_power_kernel(
             # sigma_max_sq = guess_vector * next_vector             #
             #########################################################
 
-            while idx <= n_vars
-                shared_space[idx] = new_vector[LP, idx] * guess_vector[LP, idx]
+            while idx <= current_LP_length
+                shared_space[idx] = new_eigenvector_d[active_row + idx] * eigenvector_d[active_row + idx]
                 idx += block_stride
             end
             idx = threadIdx().x
-            parallel_sum(shared_space, block_stride, var_stride, n_vars)
+            parallel_sum(shared_space, block_stride, len_stride, current_LP_length)
             
             sigma_max_sq = shared_space[1]
             sync_threads()
@@ -944,16 +1106,15 @@ function group_power_kernel(
             # residual = guess_vector - sigma_max_sq * new_vector   #
             #########################################################
 
-            while idx <= n_vars
-                shared_space[idx] = (guess_vector[LP, idx] - sigma_max_sq * new_vector[LP, idx]) ^ 2
+            while idx <= current_LP_length
+                shared_space[idx] = (eigenvector_d[active_row + idx] - sigma_max_sq * new_eigenvector_d[active_row + idx]) ^ 2
                 idx += block_stride
             end
             idx = threadIdx().x
-            parallel_sum(shared_space, block_stride, var_stride, n_vars)
-            
-            residual_norm = sqrt(shared_space[1])
-
+            parallel_sum(shared_space, block_stride, len_stride, current_LP_length)
             sync_threads()
+
+            residual_norm = sqrt(shared_space[1])
 
             # Check convergence
             if residual_norm < tolerance
@@ -966,7 +1127,7 @@ function group_power_kernel(
         # Compute step size: tau = 0.998 / sqrt(sigma_max_sq)
         if idx == 1
             result[LP] = 0.998 / sqrt(sigma_max_sq)
-            # result[LP] = 1.220128290819172e+00
+            
         end
         LP += grid_stride
     end

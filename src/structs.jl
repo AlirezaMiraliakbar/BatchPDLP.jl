@@ -1,4 +1,3 @@
-
 # Structs that are needed for BatchPDLP to function
 """
 TerminationReason explains why the solver stopped. See termination.jl for the
@@ -62,8 +61,6 @@ mutable struct LinearProgramSet
     right_hand_side::CuArray{Float64}
     objective_vector::CuArray{Float64}
     objective_constant::CuArray{Float64}
-    objective_vector_norm::Float64
-    constraint_bound_norm::Float64
 end
 import Base.copyto!
 function copyto!(to::LinearProgramSet, from::LinearProgramSet)
@@ -174,9 +171,12 @@ mutable struct KernelStorage
     delta_primal::CuArray{Float64}
     delta_primal_product::CuArray{Float64}
     delta_dual::CuArray{Float64}
-    guess_vector::CuArray{Float64}
-    new_vector::CuArray{Float64}
+    eigenvector::CuArray{Float64}
+    new_eigenvector::CuArray{Float64}
     u_vector::CuArray{Float64}
+    temp::CuArray{Float64}
+    temp_dual::CuArray{Float64}
+    residual_delta_dual::CuArray{Float64}
 end
 
 
@@ -261,7 +261,7 @@ function PDLPData(
     n_vars::Int, 
     total_LP_length::Int;
     sparsity::Matrix{Bool} = fill(true, total_LP_length, n_vars),
-    iteration_limit::Int = 1000000, #Int(typemax(Int32)),
+    iteration_limit::Int = 1000000,#Int(typemax(Int32)),
     extrapolation_coefficient::Float64 = 1.0,
     reflection_coefficient::Float64 = 1.0,
     kkt_matrix_pass_limit::Float64 = Inf,
@@ -269,8 +269,8 @@ function PDLPData(
     necessary_reduction_for_restart::Float64 = 0.5,
     sufficient_reduction_for_restart::Float64 = 0.2,
     artificial_ratio_for_restart::Float64 = 0.36,
-    abs_tol::Float64 = 1.0E-8,
-    rel_tol::Float64 = 1.0E-8,
+    abs_tol::Float64 = 1.0E-4,
+    rel_tol::Float64 = 1.0E-4,
     skip_hard_problems::Bool = false,
     pid_KP::Float64 = 0.99,
     pid_KI::Float64 = 0.01,
@@ -279,6 +279,8 @@ function PDLPData(
     )
     # Call the sparse constructor to get sparsity information
     nz, nz_rows, nz_cols = sparse_constructor(sparsity)
+    CUDA.seed!(22)
+    eigenvector0 = repeat(CUDA.randn(Float64, total_LP_length), n_LPs)
     return PDLPData(
         LinearProgramSet( # Original LPs
             CUDA.zeros(Float64, n_LPs, n_vars),
@@ -286,9 +288,8 @@ function PDLPData(
             CUDA.zeros(Float64, total_LP_length * n_LPs, n_vars),
             CUDA.zeros(Float64, total_LP_length * n_LPs),
             CUDA.zeros(Float64, n_LPs, n_vars),
-            CUDA.zeros(Float64, n_LPs),
-            0.0,
-            0.0),
+            CUDA.zeros(Float64, n_LPs)
+            ),
         LinearProgramSet( # Scaled LPs
             CUDA.zeros(Float64, n_LPs, n_vars),
             CUDA.zeros(Float64, n_LPs, n_vars),
@@ -296,8 +297,7 @@ function PDLPData(
             CUDA.zeros(Float64, total_LP_length * n_LPs),
             CUDA.zeros(Float64, n_LPs, n_vars),
             CUDA.zeros(Float64, n_LPs),
-            0.0,
-            0.0),
+            ),
         PDLPSparsity(
             nz,
             nz_rows,
@@ -338,13 +338,16 @@ function PDLPData(
             CUDA.zeros(Float64, n_LPs, n_vars), 
             CUDA.zeros(Float64, total_LP_length * n_LPs),
             CUDA.zeros(Float64, total_LP_length * n_LPs),
-            CUDA.randn(Float64, n_LPs, n_vars),
+            CUDA.ones(Float64, total_LP_length * n_LPs),#6 eigenvec
+            CUDA.zeros(Float64, total_LP_length * n_LPs),#5 new_eigenvec
+            CUDA.zeros(Float64, n_LPs, n_vars),#4 u_vec
             CUDA.zeros(Float64, n_LPs, n_vars),
-            CUDA.zeros(Float64, total_LP_length * n_LPs)
+            CUDA.zeros(Float64, total_LP_length * n_LPs),
+            CUDA.zeros(Float64, total_LP_length * n_LPs),
         ),
         PDLPParams( # Parameters
-            10,                               # Iterations for Ruiz rescaling
-            1.0,                              # Alpha for Pock Chambolle rescaling
+            20,                               # Iterations for Ruiz rescaling
+            nothing,                              # Alpha for Pock Chambolle rescaling
             true,                             # Scale initial primal weight flag
             false,                             # Bound Objective Rescaling flag
             extrapolation_coefficient,        # Extrapolation coefficient used for taking steps

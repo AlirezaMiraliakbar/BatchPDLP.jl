@@ -25,7 +25,7 @@ function ruiz_rescaling(
             dims.total_LP_length
             )
         # we got temp_variable_rescaling from ruiz_variable_kernel 
-
+        
         # Constraint resscaling. sqrt of the maximum value of each row of the constraint matrix
         CUDA.@sync @cuda blocks=GPU_blocks threads=512 ruiz_constraint_kernel(
             temp_constraint_rescaling, # result_storage
@@ -34,11 +34,12 @@ function ruiz_rescaling(
             dims.total_LP_length # total_LP_length
             )
         # we got temp_constraint_rescaling from ruiz_constraint_kernel 
-        
-        
+        # println("iteration $j of Ruiz rescaling method: \n")
+        # println("   - temp_variable_rescaling = $temp_variable_rescaling \n")
+        # println("   - temp_constraint_rescaling = $temp_constraint_rescaling \n")
             
         
-        # Use the variable and constraint rescaling values to scale the problem
+        # Use the temp variable and constraint rescaling values to scale the problem
         scale_problem(
             problem, 
             temp_variable_rescaling, 
@@ -90,6 +91,8 @@ function pock_chambolle_rescaling(
         alpha, 
         )
 
+    # println("   - temp_variable_rescaling at pock_chambolle = $temp_variable_rescaling \n")
+    # println("   - temp_constraint_rescaling at pock_chambolle = $temp_constraint_rescaling \n")
     # Apply the rescaling values to the problem
     scale_problem(
         problem, 
@@ -538,26 +541,38 @@ function add_multiple_LP_lower_bound(
 end
 
 
-function update_constant_step_size(problem::LinearProgramSet, step_size::CuArray{Float64}, guess_vector::CuArray{Float64}, new_vector::CuArray{Float64}, u_vec::CuArray{Float64}, dims::PDLPDims)
+function update_constant_step_size(problem::LinearProgramSet, 
+    step_size::CuArray{Float64}, 
+    eigenvector_d::CuArray{Float64}, 
+    next_eigenvector_d::CuArray{Float64}, 
+    u_vec::CuArray{Float64},
+    nz_counts::Int,
+    nz_rows::CuArray{Int32},
+    nz_cols::CuArray{Int32},
+    active_constraint::CuArray{Bool},
+    dims::PDLPDims)
     # println("calculating step size using power iteration...")
     n_vars = dims.n_vars
     max_value = max(dims.current_LP_length, n_vars)
     shmem_bytes = max_value * sizeof(Float64) 
 
-    GPU_blocks = Int32(CUDA.attribute(CUDA.device(), CUDA.DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT))
     threads_per_block = 256 
     iterations = Int32(5000)     
 
-    CUDA.@sync @cuda blocks=GPU_blocks threads=threads_per_block shmem=shmem_bytes group_power_kernel(
+    CUDA.@sync @cuda blocks=dims.n_LPs threads=threads_per_block shmem=shmem_bytes group_power_kernel(
         step_size, 
         problem.constraint_matrix, 
         dims.n_LPs, 
         dims.n_vars,
+        nz_counts,
+        nz_rows,
+        nz_cols,
+        active_constraint,
         dims.total_LP_length, 
         dims.current_LP_length,
         u_vec,  
-        guess_vector,  
-        new_vector,    
+        eigenvector_d,  
+        next_eigenvector_d,    
         iterations,
         1e-4,
     )
