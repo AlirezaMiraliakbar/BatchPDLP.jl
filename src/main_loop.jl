@@ -109,9 +109,7 @@ function main_loop_kernel(
 
     # Set up dynamic shared space
     shared_space = @cuDynamicSharedMem(Float64, max(n_vars, current_LP_length))
-    # if idx==1 && LP == 1
-    #     #CUDA.@cuprintln("Reached 2: right at the begning of the kernel")
-    # end
+
 
     while LP <= n_LPs
           
@@ -122,9 +120,9 @@ function main_loop_kernel(
         end
 
         # Initialize basic information for this LP
-            ## information bookkeeping
-            ## Only thread 1 of this block will store these information 
-            ## the information below does not need to be stored per thread
+        ## information bookkeeping
+        ## Only thread 1 of this block will store these information 
+        ## the information below does not need to be stored per thread
         if idx==1
             cumulative_kkt_passes = 0.5
 
@@ -138,7 +136,6 @@ function main_loop_kernel(
             CI_l2_dual_residual = 0.0
 
             
-            last_reduction_ratio = 1.0
             last_fixed_point_error = Inf
             restart_error = 0.0
             sum_restart_error = 0.0
@@ -166,14 +163,10 @@ function main_loop_kernel(
         end
 
         # Other information that every thread needs (stored in the Registery memory)
-            ## The values are always identical across threads — it is replicated rather than shared for performance purposes.
+        ## The values are always identical across threads — it is replicated rather than shared for performance purposes.
         
         total_iterations = Int32(0) # total iteration counter (T)
         inner_iterations = Int32(0)
-        termination_stop = Int32(0)
-
-        primal_ray_norm = 0.0
-
 
         
         # Information that is much easier to save as static shared memory (L1 Block memory)
@@ -182,14 +175,12 @@ function main_loop_kernel(
         best_primal_weight = @cuStaticSharedMem(Float64, 1)
         numerical_error = @cuStaticSharedMem(Bool, 1)
         step_size = @cuStaticSharedMem(Float64, 1)
+
         if idx==1
             do_restart[1] = false
             primal_weight[1] = input_primal_weight[LP]
-            # primal_weight[1] = 2.459590173939150e-06
             best_primal_weight[1] = primal_weight[1]
             step_size[1] = input_step_size[LP]
-            # step_size[1] = 1.011530191275437e+00
-
             numerical_error[1] = false
         end
 
@@ -231,14 +222,7 @@ function main_loop_kernel(
             cache_l2_norm_primal_right_hand_side = sqrt(shared_space[1])
         end
 
-
-        
-
-
-
         # Begin the main loop
-        ITERATION_COUNT = 0
-        ##idx==1 && #CUDA.@cuprintlln("Reached 3: getting into outer loop")
         while total_iterations <= iteration_limit
 
                 ##########################################################################################
@@ -248,40 +232,10 @@ function main_loop_kernel(
                 epoch_iterations = Int32(0) # counter for inner loop for computation purposes
 
                 while epoch_iterations < termination_evaluation_frequency
-                    ##idx==1 && #CUDA.@cuprintlln("Reached 4: just got into inner loop where epoch is $(epoch_iterations)")
+
                     local_primal_weight = unsafe_load(CUDA.pointer(primal_weight, 1))
                     local_step_size = unsafe_load(CUDA.pointer(step_size, 1))
-                    ITERATION_COUNT += 1    
-                    # idx==1 && #CUDA.@cuprintln(">>>>>>>>>>>>ITERATION $ITERATION_COUNT HAS BEGUN<<<<<<<<<<<<<<<< \n")
-                    
-                    # idx==1 && #CUDA.@cuprintln("Step Size = $(local_step_size) |  Primal Weight = $(local_primal_weight) \n")
-                    #idx==1 && #CUDA.@cuprintlln("\nINITIAL VALUES")
-                    #idx==1 && #CUDA.@cuprintlln("Initial primal solution: [$(initial_primal_solution[1,1]), $(initial_primal_solution[1,2])]")
-                    #idx==1 && #CUDA.@cuprintlln("Current primal solution: [$(current_primal_solution[1,1]), $(current_primal_solution[1,2])]")
-                    #idx==1 && #CUDA.@cuprintlln("Current primal product: [$(current_primal_product[1]), $(current_primal_product[2]), $(current_primal_product[3]), $(current_primal_product[4])]")
-                    #idx==1 && #CUDA.@cuprintlln("current_dual_product: [$(current_dual_product[1,1]), $(current_dual_product[1,2])]")
-                    #idx==1 && #CUDA.@cuprintlln("Current dual solution: [$(current_dual_solution[1]), $(current_dual_solution[2]), $(current_dual_solution[3]), $(current_dual_solution[4])]\n")
-                    #idx==1 && #CUDA.@cuprintlln("Initial dual solution: [$(initial_dual_solution[1]), $(initial_dual_solution[2]), $(initial_dual_solution[3]), $(initial_dual_solution[4])]\n")
-                    
-                    #idx==1 && #CUDA.@cuprintlln("\nSCALED VARIABLE BOUNDS\n")
-                    #idx==1 && #CUDA.@cuprintlln("var1: [$(scaled_variable_lower_bounds[1,1]), $(scaled_variable_upper_bounds[1,1])]")
-                    #idx==1 && #CUDA.@cuprintlln("var2: [$(scaled_variable_lower_bounds[1,2]), $(scaled_variable_upper_bounds[1,2])]")
 
-
-                    #idx==1 && #CUDA.@cuprintlln("\nSCALED CONSTRAINT MATRIX\n")
-                    #idx==1 && #CUDA.@cuprintlln("scaled_constraint_matrix: [$(scaled_constraint_matrix[1,1]), $(scaled_constraint_matrix[1,2])]")
-                    #idx==1 && #CUDA.@cuprintlln("scaled_constraint_matrix: [$(scaled_constraint_matrix[2,1]), $(scaled_constraint_matrix[2,2])]")
-                    #idx==1 && #CUDA.@cuprintlln("scaled_constraint_matrix: [$(scaled_constraint_matrix[3,1]), $(scaled_constraint_matrix[3,2])]")
-                    #idx==1 && #CUDA.@cuprintlln("scaled_constraint_matrix: [$(scaled_constraint_matrix[4,1]), $(scaled_constraint_matrix[4,2])]")
-
-                    #TODO: remove later
-                    # if ITERATION_COUNT == 4
-                    #     local_primal_weight = 8.543563
-                    # end
-                    
-
-                    
-                    
                     # Step 1) Add one to the total iterations tracker and cumulative kkt passes
                     
                     if idx==1
@@ -310,12 +264,7 @@ function main_loop_kernel(
                     end
                     idx = threadIdx().x
 
-                    # Step 3) Calculate the next primal solution information
-                    
-                    # in cuPDLPx, d_primal_step_size = step_size/primal_weight
-
-                    # idx == 1 && #CUDA.@cuprintln("iteration $ITERATION_COUNT: weight = $weight")
-                    
+                    # Step 3) Calculate the next primal solution information                    
 
                     while idx <= n_vars
                         temp[LP, idx] = current_primal_solution[LP, idx] - (local_step_size/local_primal_weight) * (scaled_objective_vector[LP, idx] - current_dual_product[LP, idx])
@@ -353,9 +302,7 @@ function main_loop_kernel(
 
 
                     # Step 5) Compute the next dual solution
-                    
 
-                    # weight = ((inner_iterations + 1)/ (inner_iterations + 2))
                     while idx <= current_LP_length
 
                         temp_dual[active_row + idx] = (current_dual_solution[active_row + idx] / (local_primal_weight*local_step_size) - current_primal_product[active_row + idx])
@@ -366,202 +313,6 @@ function main_loop_kernel(
                         idx += block_stride
                     end
                     idx = threadIdx().x
-
-                    # idx==1 && #CUDA.@cuprintlln("\n PRIMAL THINGS AFTER TAKING STEP \n")
-                    # idx==1 && #CUDA.@cuprintlln("current_dual_product: [$(current_dual_product[1,1]), $(current_dual_product[1,2])]")
-                    # idx==1 && #CUDA.@cuprintlln("temp: [$(temp[1,1]), $(temp[1,2])]")
-                    # idx==1 && #CUDA.@cuprintlln("pdhg_primal_solution: [$(pdhg_primal_solution[1,1]), $(pdhg_primal_solution[1,2])]")
-                    # idx==1 && #CUDA.@cuprintln("dual_slack: [$(dual_slack[1,1]), $(dual_slack[1,2])]")
-                    # idx==1 && #CUDA.@cuprintlln("Reflected_primal_solution: [$(reflected_primal_solution[1,1]), $(reflected_primal_solution[1,2])]")
-                    # idx==1 && #CUDA.@cuprintlln("current_primal_solution: [$(current_primal_solution[1,1]), $(current_primal_solution[1,2])]")
-
-                    
-                    
-
-                    #idx==1 && #CUDA.@cuprintlln("\nDUAL THINGS AFTER TAKING STEP\n")
-                    #idx==1 && #CUDA.@cuprintlln("scaled_right_hand_side: [$(scaled_right_hand_side[1]), $(scaled_right_hand_side[2]), $(scaled_right_hand_side[3]), $(scaled_right_hand_side[4])]")
-                    #idx==1 && #CUDA.@cuprintlln("current_primal_product: [$(current_primal_product[1]), $(current_primal_product[2]), $(current_primal_product[3]), $(current_primal_product[4])]")
-                    #idx==1 && #CUDA.@cuprintlln("pdhg_dual_solution: [$(pdhg_dual_solution[1]), $(pdhg_dual_solution[2]), $(pdhg_dual_solution[3]), $(pdhg_dual_solution[4])]")
-                    #idx==1 && #CUDA.@cuprintlln("Reflected_dual_solution: [$(reflected_dual_solution[1]), $(reflected_dual_solution[2]), $(reflected_dual_solution[3]), $(reflected_dual_solution[4])]")
-                    #idx==1 && #CUDA.@cuprintlln("current_dual_solution: [$(current_dual_solution[1]), $(current_dual_solution[2]), $(current_dual_solution[3]), $(current_dual_solution[4])] \n")
-                    # error()
-
-                    # ------ MY CODE -----------
-
-
-                    # while idx <= n_vars 
-                    #     pdhg_primal_solution[LP, idx] = min(scaled_variable_upper_bounds[LP, idx], max(scaled_variable_lower_bounds[LP, idx], current_primal_solution[LP, idx] - 
-                    #                                     (local_step_size/local_primal_weight) * (scaled_objective_vector[LP, idx] - current_dual_product[LP, idx])))
-                    #     idx += block_stride
-                    # end
-
-                    # idx = threadIdx().x
-
-                    # # Compute delta primal for dual step
-                    # while idx <= n_vars 
-                    #     delta_primal[LP, idx] = pdhg_primal_solution[LP, idx] - current_primal_solution[LP, idx]
-                    #     idx += block_stride
-                    # end
-
-                    # idx = threadIdx().x
-
-                    # # Reset delta_primal_product and the shared space
-                    # while idx <= current_LP_length
-                    #     delta_primal_product[active_row + idx] = 0.0
-                    #     shared_space[idx] = 0.0
-                    #     idx += block_stride
-                    # end
-                    # idx = threadIdx().x
-
-                    # sync_threads()
-
-                    # # Loop over nonzeros to update delta_primal_product
-                    # while idx <= nz_count
-                    #     if active_constraint[active_row + nz_rows[idx]]
-                    #         CUDA.atomic_add!(CUDA.pointer(shared_space, nz_rows[idx]), scaled_constraint_matrix[active_row + nz_rows[idx], nz_cols[idx]] * delta_primal[LP, nz_cols[idx]])
-                    #     end
-                    #     idx += block_stride
-                    # end
-                    # idx = threadIdx().x
-
-                    # sync_threads()
-                    # while idx <= current_LP_length
-                    #     delta_primal_product[active_row + idx] += shared_space[idx]
-                    #     idx += block_stride
-                    # end
-                    # idx = threadIdx().x
-
-                    # # Compute other terms normally
-                    # while idx <= current_LP_length
-                    #     pdhg_dual_solution[active_row + idx] = max(0.0, (current_dual_solution[active_row + idx] + 
-                    #                         (local_primal_weight * local_step_size) * (scaled_right_hand_side[active_row + idx] -
-                    #                         ((Int32(1) + extrapolation_coefficient) * 
-                    #                         delta_primal_product[active_row + idx]) - 
-                    #                         (extrapolation_coefficient * current_primal_product[active_row + idx]))))
-
-                    #     idx += block_stride
-                    # end
-                    
-                    # idx = threadIdx().x
-
-                    
-                    # # taking the Halpern scheme with Reflection step and calculate it as delta_primal
-                    # while idx <= n_vars
-                    #     delta_primal[LP, idx] = ((inner_iterations + 1)/ (inner_iterations + 2)) * ( ( 1 + reflection_coefficient) * pdhg_primal_solution[LP, idx] - reflection_coefficient * current_primal_solution[LP, idx]) + (1 / (inner_iterations + 2)) * initial_primal_solution[LP, idx] - current_primal_solution[LP, idx]
-                    #     idx += block_stride
-                    # end
-                    # idx = threadIdx().x
-
-                    
-
-                    # while idx <= n_vars
-                    #     current_primal_solution[LP, idx] += delta_primal[LP, idx]
-                    #     idx += block_stride
-                    # end
-                    # idx = threadIdx().x
-
-                    # if idx == 1 
-                    #     #CUDA.@cuprintln("step = $(epoch_iterations): current primal= $(current_primal_solution[1,1]), $(current_primal_solution[1,2])")
-                    #     # #CUDA.@cuprintln("----------: $(pdhg_primal_solution[1,1]), $(pdhg_primal_solution[1,2])")
-                    # end
-
-                    # while idx <= current_LP_length
-
-                    #     delta_dual[active_row + idx] = ((inner_iterations + 1)/ (inner_iterations + 2)) * ( ( 1 + reflection_coefficient) * pdhg_dual_solution[active_row + idx] - reflection_coefficient * current_dual_solution[active_row + idx]) + (1 / (inner_iterations + 2)) * initial_dual_solution[active_row + idx] - current_dual_solution[active_row + idx]
-                    #     idx += block_stride
-                    # end
-                    # idx = threadIdx().x
-
-                    # while idx <= current_LP_length
-                    #     current_dual_solution[active_row + idx] += delta_dual[active_row + idx]
-                    #     idx += block_stride
-                    # end
-                    # idx = threadIdx().x
-
-                    # sync_threads()
-
-                    # # Reset delta_primal_product and the shared space
-                    # while idx <= current_LP_length
-                    #     delta_primal_product[active_row + idx] = 0.0
-                    #     shared_space[idx] = 0.0
-                    #     idx += block_stride
-                    # end
-                    # idx = threadIdx().x
-
-                    # sync_threads()
-
-                    # # Loop over nonzeros to update delta_primal_product
-                    # while idx <= nz_count
-                    #     if active_constraint[active_row + nz_rows[idx]]
-                    #         CUDA.atomic_add!(CUDA.pointer(shared_space, nz_rows[idx]), scaled_constraint_matrix[active_row + nz_rows[idx], nz_cols[idx]] * delta_primal[LP, nz_cols[idx]])
-                    #     end
-                    #     idx += block_stride
-                    # end
-                    # idx = threadIdx().x
-
-                    # sync_threads()
-                    # while idx <= current_LP_length
-                    #     delta_primal_product[active_row + idx] += shared_space[idx]
-                    #     idx += block_stride
-                    # end
-                    # idx = threadIdx().x
-                    
-                    # while idx <= current_LP_length
-                    #     current_primal_product[active_row + idx] += delta_primal_product[active_row + idx]
-                    #     shared_space[idx] = delta_primal_product[active_row + idx] * delta_dual[active_row + idx]
-                    #     idx += block_stride
-                    # end
-
-                    # idx = threadIdx().x
-                    # parallel_sum(shared_space, block_stride, len_stride, current_LP_length)
-                   
-                    # if idx==1
-                    #     cross_term = shared_space[1]
-                    #     if inner_iterations == Int32(0)
-                    #         anchor_cross_term  = cross_term
-                    #     end
-                    # end
-                    # initial fixed point error calculations 
-
-                    
-
-                    # while idx <= current_LP_length
-                    #     shared_space[idx] = delta_dual[active_row + idx] ^ 2
-                    #     idx += block_stride
-                    # end
-                    # idx = threadIdx().x
-                    # parallel_sum(shared_space, block_stride, len_stride, current_LP_length)
-
-                    # if idx == 1
-                    #     squared_delta_dual = shared_space[1]
-                    #     if inner_iterations == Int32(0)
-                    #         anchor_squared_delta_dual = squared_delta_dual
-                    #     end
-                    # end
-
-                    # # Reset current_dual_product and the shared space
-                    # while idx <= n_vars
-                    #     current_dual_product[LP, idx] = 0.0
-                    #     shared_space[idx] = 0.0
-                    #     idx += block_stride
-                    # end
-                    # idx = threadIdx().x
-                    # sync_threads()
-
-                    # # Loop over nonzeros to update current_dual_product: 
-                    # while idx <= nz_count
-                    #     if active_constraint[active_row + nz_rows[idx]]
-                    #         CUDA.atomic_add!(CUDA.pointer(shared_space, nz_cols[idx]), scaled_constraint_matrix[active_row + nz_rows[idx], nz_cols[idx]] * current_dual_solution[active_row + nz_rows[idx]])
-                    #     end
-                    #     idx += block_stride
-                    # end
-                    # idx = threadIdx().x
-                    # sync_threads()
-                    # while idx <= n_vars
-                    #     current_dual_product[LP, idx] += shared_space[idx]
-                    #     idx += block_stride
-                    # end
-                    # idx = threadIdx().x
 
                     sync_threads() 
 
@@ -641,9 +392,7 @@ function main_loop_kernel(
                     inner_iterations += Int32(1)
                     epoch_iterations += Int32(1)     
                     sync_threads()   
-                    # error()
                 end     
-                termination_stop += Int32(1)    
 
                 while idx <= n_vars
                     current_primal_gradient[LP, idx] = scaled_objective_vector[LP, idx] - current_dual_product[LP, idx]
@@ -1052,66 +801,30 @@ function main_loop_kernel(
                 
                 total_iterations += Int32(termination_evaluation_frequency)
 
-                # if total_iterations == 4800
-                #     primal_weight[1] = 6120.207109
-                #     best_primal_weight[1] = 6120.207109
-                # end
-
-                # if idx == 1
-                #     #CUDA.@cuprintln(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> TOTAL ITERATION $(total_iterations) <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<")
-                #     #CUDA.@cuprintln("objective vector norm = $(cache_l2_norm_primal_linear_objective)")
-                #     #CUDA.@cuprintln("constarin vector norm = $(cache_l2_norm_primal_right_hand_side)")
-                #     # #CUDA.@cuprintln("=== EVALUATION at total_count=$total_iterations ===")
-                #     #CUDA.@cuprintf("Fixed point error = %.3e \n", candidate_fixed_error )
-                #     #CUDA.@cuprintf("Initial fixed point error = %.3e \n" , initial_fixed_error)
-                #     #CUDA.@cuprintln("Primal Weight = $(primal_weight[1]) | Step size = $(step_size[1])")
-                    
-                #     #CUDA.@cuprintln("\n PRIMAL THINGS \n")
-                #     #CUDA.@cuprintln("residual_dual_product: [$(residual_dual_product[1,1]), $(residual_dual_product[1,2])]")
-                    
-                #     #CUDA.@cuprintln("current_dual_product: [$(current_dual_product[1,1]), $(current_dual_product[1,2])]")
-                #     #CUDA.@cuprintln("temp: [$(temp[1,1]), $(temp[1,2])]")
-                #     #CUDA.@cuprintln("initial_primal_solution: [$(initial_primal_solution[1,1]), $(initial_primal_solution[1,2])]")
-                #     #CUDA.@cuprintln("pdhg_primal_solution: [$(pdhg_primal_solution[1,1]), $(pdhg_primal_solution[1,2])]")
-                #     #CUDA.@cuprintln("dual_slack: [$(dual_slack[1,1]), $(dual_slack[1,2])]")
-                #     #CUDA.@cuprintln("Reflected_primal_solution: [$(reflected_primal_solution[1,1]), $(reflected_primal_solution[1,2])]")
-                #     #CUDA.@cuprintln("current_primal_solution: [$(current_primal_solution[1,1]), $(current_primal_solution[1,2])]")
-                #     #CUDA.@cuprintln("dual_residual: [$(dual_residual[1,1]), $(dual_residual[1,2])]")
-                    
-
-                #     #CUDA.@cuprintln("\nDUAL THINGS\n")
-                #     #CUDA.@cuprintln("residual primal product: [$(residual_primal_product[1]), $(residual_primal_product[2]), $(residual_primal_product[3]), $(residual_primal_product[4])]")
-                #     #CUDA.@cuprintf("primal_residual: [%.3e, %.3e, %.3e, %.3e] \n", primal_residual[1], primal_residual[2], primal_residual[3], primal_residual[4])
-                #     #CUDA.@cuprintln("current_primal_product: [$(current_primal_product[1]), $(current_primal_product[2]), $(current_primal_product[3]), $(current_primal_product[4])]")
-                #     #CUDA.@cuprintln("pdhg_dual_solution: [$(pdhg_dual_solution[1]), $(pdhg_dual_solution[2]), $(pdhg_dual_solution[3]), $(pdhg_dual_solution[4])]")
-                #     #CUDA.@cuprintln("Reflected_dual_solution: [$(reflected_dual_solution[1]), $(reflected_dual_solution[2]), $(reflected_dual_solution[3]), $(reflected_dual_solution[4])]")
-                #     #CUDA.@cuprintln("current_dual_solution: [$(current_dual_solution[1]), $(current_dual_solution[2]), $(current_dual_solution[3]), $(current_dual_solution[4])] \n")
-                # end
                 ##########################################################################################
                 #                            Check Termination Criteria                                  #
                 ##########################################################################################
-                ##idx==1 && #CUDA.@cuprintlln("Reached 6: residuals done! about to check the termination criteria")
                 sync_threads()
 
                 # Check optimality criteria
                 if idx==1
-                    # #CUDA.@cuprintln("Termination metrics: rel_dual_residual = %.3e \n", relative_dual_residual)
+
                     # Check if the dual objective value is above the B&B global upper bound and we
                     # satisfy the tolerance for dual feasibility
                     # (if we're past the first 10 iterations)
-                    # if (CI_dual_objective > global_upper_bound + abs_tol) &&
-                    #     (CI_l2_dual_residual < abs_tol + rel_tol*cache_l2_norm_primal_linear_objective) 
-                    #     termination_reason[LP] = TERMINATION_REASON_GLOBAL_UPPER_BOUND_HIT
-                    # end
+                    if (CI_dual_objective > global_upper_bound + abs_tol) &&
+                        (CI_l2_dual_residual < abs_tol + rel_tol*cache_l2_norm_primal_linear_objective) 
+                        termination_reason[LP] = TERMINATION_REASON_GLOBAL_UPPER_BOUND_HIT
+                    end
 
                     # If we want to skip harder-than-average problems, and we've already solved at least
                     # 100 problems, check if the current number of iterations is over two times the running
                     # average
-                    # if skip_hard_problems && (unsafe_load(CUDA.pointer(global_counter, 1)) > 100)
-                    #     if total_iterations > 2*(unsafe_load(CUDA.pointer(iteration_counter, 1))/unsafe_load(CUDA.pointer(global_counter, 1)))
-                    #         termination_reason[LP] = TERMINATION_REASON_IMPATIENCE
-                    #     end
-                    # end
+                    if skip_hard_problems && (unsafe_load(CUDA.pointer(global_counter, 1)) > 100)
+                        if total_iterations > 2*(unsafe_load(CUDA.pointer(iteration_counter, 1))/unsafe_load(CUDA.pointer(global_counter, 1)))
+                            termination_reason[LP] = TERMINATION_REASON_IMPATIENCE
+                        end
+                    end
 
                     # Check iteration limit
                     if total_iterations >= iteration_limit
@@ -1120,9 +833,9 @@ function main_loop_kernel(
                     end
 
                     # Check KKT matrix pass limit
-                    # if cumulative_kkt_passes >= kkt_matrix_pass_limit
-                    #     termination_reason[LP] = TERMINATION_REASON_KKT_MATRIX_PASS_LIMIT
-                    # end
+                    if cumulative_kkt_passes >= kkt_matrix_pass_limit
+                        termination_reason[LP] = TERMINATION_REASON_KKT_MATRIX_PASS_LIMIT
+                    end
 
                     # Check for numerical errors
                     if numerical_error[1]
@@ -1132,17 +845,12 @@ function main_loop_kernel(
                     # Check if we're within the tolerances for primal and dual infeasibility, and that there's
                     # a sufficiently small gap between the primal and dual objective values.
 
-                    # if (CI_l2_dual_residual < abs_tol + rel_tol*cache_l2_norm_primal_linear_objective) &&
-                    #     (CI_l2_primal_residual < abs_tol + rel_tol*cache_l2_norm_primal_right_hand_side) &&
-                    #     (abs(CI_primal_objective - CI_dual_objective) < abs_tol + rel_tol*(abs(CI_primal_objective)+abs(CI_dual_objective))) 
-
-                    #     termination_reason[LP] = TERMINATION_REASON_OPTIMAL
-                    # end
+                    
 
                     if (relative_dual_residual < rel_tol) &&
                         (relative_primal_residual < rel_tol) &&
                         (relative_objective_gap < rel_tol)
-                        # #CUDA.@cuprint("LP problem $LP is optimal! \n")
+
                         termination_reason[LP] = TERMINATION_REASON_OPTIMAL
                     end
                     
@@ -1161,9 +869,6 @@ function main_loop_kernel(
                     #     termination_reason[LP] = TERMINATION_REASON_DUAL_INFEASIBLE
                     # end
                 end
-
-                ##idx==1 && #CUDA.@cuprintlln("Reached 7: termination reseaons got checked!")
-                # Update Solutions (UPDATED!)
                 
 
                 # If the LP is finished, update the solutions and objective(s), and
@@ -1190,15 +895,7 @@ function main_loop_kernel(
                         CUDA.atomic_add!(CUDA.pointer(global_counter, 1), Int32(1))
                         CUDA.atomic_add!(CUDA.pointer(iteration_counter, 1), Int32(total_iterations))
                     end
-                    # if idx == 1
-                        
-                    #     CUDA.@cuprintln("Primal Objective: $CI_primal_objective")
-                    #     CUDA.@cuprintln("Dual Objective: $CI_dual_objective")
-                    #     CUDA.@cuprintf("Objective gap %.3e (abs: %.3e) :\n", Float64(relative_objective_gap), Float64(objective_gap))
-                    #     CUDA.@cuprintf("Primal infeas %.3e (abs: %.3e) :\n", Float64(relative_primal_residual), Float64(CI_l2_primal_residual))
-                    #     CUDA.@cuprintf("Dual infeas %.3e  (abs: %.3e) :\n", Float64(relative_dual_residual), Float64(CI_l2_dual_residual))
-                    # end
-                    ##idx==1 && #CUDA.@cuprintlln("Reached 15: since $reason we got terminated, next LP on board!")
+                    
                     LP += grid_stride
                     break
                 elseif (reason == TERMINATION_REASON_PRIMAL_INFEASIBLE) || 
@@ -1240,28 +937,17 @@ function main_loop_kernel(
                     idx = threadIdx().x
                     if idx==1
                         if return_code != Int32(3)
-                            # objectives[LP] = -Inf
+                            objectives[LP] = -Inf
                             objectives[LP] = CI_primal_objective
                         else
-                            # objectives[LP, Int32(1)] = -Inf
-                            # objectives[LP, Int32(2)] = -Inf
-                            objectives[LP, Int32(1)] = CI_primal_objective
-                            objectives[LP, Int32(2)] = CI_dual_objective
+                            objectives[LP, Int32(1)] = -Inf
+                            objectives[LP, Int32(2)] = -Inf
                         end
                         iterations[LP] = total_iterations
                         CUDA.atomic_add!(CUDA.pointer(global_counter, 1), Int32(1))
                         CUDA.atomic_add!(CUDA.pointer(iteration_counter, 1), Int32(total_iterations))
                     end
 
-                    # if idx == 1
-                        
-                    #     CUDA.@cuprintln("Primal Objective: $CI_primal_objective")
-                    #     CUDA.@cuprintln("Dual Objective: $CI_dual_objective")
-                    #     CUDA.@cuprintf("Objective gap %.3e (abs: %.3e) :\n", Float64(relative_objective_gap), Float64(objective_gap))
-                    #     CUDA.@cuprintf("Primal infeas %.3e (abs: %.3e) :\n", Float64(relative_primal_residual), Float64(CI_l2_primal_residual))
-                    #     CUDA.@cuprintf("Dual infeas %.3e  (abs: %.3e) :\n", Float64(relative_dual_residual), Float64(CI_l2_dual_residual))
-                    # end
-                    ##idx==1 && #CUDA.@cuprintlln("Reached 15: since $reason we got terminated, next LP on board!")
                     LP += grid_stride
                     break
                 elseif (reason == TERMINATION_REASON_GLOBAL_UPPER_BOUND_HIT)
@@ -1306,11 +992,10 @@ function main_loop_kernel(
                         CUDA.atomic_add!(CUDA.pointer(global_counter, 1), Int32(1))
                         CUDA.atomic_add!(CUDA.pointer(iteration_counter, 1), Int32(total_iterations))
                     end
-                    ##idx==1 && #CUDA.@cuprintlln("Reached 15: since $reason we got terminated, next LP on board!")
                     LP += grid_stride
                     break
                 end
-                ##idx==1 && #CUDA.@cuprintlln("Reached 8: Reasons are checked! No stoppage here, about to check restart conditions")
+
                 ##########################################################################################
                 #                            Check Restart Conditions                                    #
                 ##########################################################################################
@@ -1318,29 +1003,25 @@ function main_loop_kernel(
                 # Check if we need to do a restart
                 if idx == 1
                     if total_iterations == termination_evaluation_frequency
-                        # CUDA.@cuprintln("****** RESTART ******** = total iterations hit the evaluation frequency")
+
                         do_restart[1] = true 
 
                     elseif total_iterations > termination_evaluation_frequency
 
                         if candidate_fixed_error < sufficient_reduction_for_restart * initial_fixed_error
-                            # CUDA.@cuprintln("****** RESTART ******** = sufficient reduction ")
+
                             do_restart[1] = true
                         end
 
                         if candidate_fixed_error < necessary_reduction_for_restart * initial_fixed_error
                             if candidate_fixed_error > last_fixed_point_error
-                                # CUDA.@cuprintln("****** RESTART ******** = last reduction ratio")
+
                                 do_restart[1] = true
                             end
                         end
                         
 
                         if inner_iterations >= artificial_ratio_for_restart * (total_iterations)
-                            # CUDA.@cuprintln("****** RESTART ******** = long inner loop")
-                            # #CUDA.@cuprintln("       - inner iteration = $inner_iterations")
-                            # #CUDA.@cuprintln("       - total iteration = $total_iterations")
-                            # #CUDA.@cuprintln("       - RHS = $(artificial_ratio_for_restart * (total_iterations - 1))")
                             do_restart[1] = true
                         end
                     end
@@ -1349,7 +1030,6 @@ function main_loop_kernel(
                     
                 end
 
-                ##idx==1 && #CUDA.@cuprintlln("Reached 9: Restart conditions done! will perform restart if needed!")
                 ##########################################################################################
                 #                            Perform Restart if do_restart = true                        #
                 ##########################################################################################
@@ -1359,15 +1039,7 @@ function main_loop_kernel(
                     
                     # Primal distance
                     while idx <= n_vars 
-                        # shared_space[idx] = (current_primal_solution[LP, idx] - initial_primal_solution[LP, idx]) ^ 2
                         shared_space[idx] = (pdhg_primal_solution[LP, idx] - initial_primal_solution[LP, idx]) ^ 2
-                        idx += block_stride
-                    end
-                    idx = threadIdx().x
-
-                    while idx <= n_vars 
-                        # shared_space[idx] = (current_primal_solution[LP, idx] - initial_primal_solution[LP, idx]) ^ 2
-                        # #CUDA.@cuprintln("delta_primal_solution for restart distance = $(shared_space[idx])")
                         idx += block_stride
                     end
                     idx = threadIdx().x
@@ -1375,13 +1047,11 @@ function main_loop_kernel(
                     parallel_sum(shared_space, block_stride, var_stride, n_vars)
 
                     if idx == 1
-                        # restart_primal_distance = sqrt(primal_weight[1]) * sqrt(shared_space[1])
                         restart_primal_distance = sqrt(shared_space[1])
                     end
                     
                     # Dual distance
                     while idx <= current_LP_length
-                        # shared_space[idx] = (current_dual_solution[active_row + idx] - initial_dual_solution[active_row + idx]) ^ 2
                         shared_space[idx] = (pdhg_dual_solution[active_row + idx] - initial_dual_solution[active_row + idx]) ^ 2
                         idx += block_stride
                     end
@@ -1389,20 +1059,10 @@ function main_loop_kernel(
                     parallel_sum(shared_space, block_stride, len_stride, current_LP_length)
 
                     if idx == 1
-                        # restart_dual_distance = (1 / sqrt(primal_weight[1])) * sqrt(shared_space[1])
                         restart_dual_distance = sqrt(shared_space[1])
-                        # #CUDA.@cuprintln("constraint bound norm = $constraint_bound_norm")
-                        # relative_primal_residual = CI_l2_primal_residual / (1.0 + constraint_bound_norm)
-                        # relative_dual_residual = CI_l2_dual_residual / (1.0 + objective_vector_norm)
-                        
                         ratio_infeas = relative_dual_residual / relative_primal_residual
                     end
-
-
-                    #### Update Information About the Last Restart
                     
-
-                
                     # initialize the primal anchor 
                     while idx <= n_vars
                         initial_primal_solution[LP, idx] = pdhg_primal_solution[LP, idx]
@@ -1431,21 +1091,18 @@ function main_loop_kernel(
                     end
                     idx = threadIdx().x
 
-                    ## resetting step itertation back to 0 
+                    # resetting step itertation back to 0 
                     inner_iterations = Int32(0)
                     
                     # we do not restart to average in Halpern Reflection Scheme
                     if idx==1
-                        last_reduction_ratio = 1.0
                         last_fixed_point_error = Inf
                         restart_choice = RESTART_CHOICE_LAST_ITERATE_RESET
                     end
-                    ##idx==1 && #CUDA.@cuprintlln("Reached 11: Restarting finished")
                 else
                     if idx==1
                         restart_choice = RESTART_CHOICE_NO_RESTART
                     end
-                    ##idx==1 && #CUDA.@cuprintlln("Reached 12: No Restarting was needed")
                 end
                 
 
@@ -1456,30 +1113,20 @@ function main_loop_kernel(
                 sync_threads()
                 if idx==1
                     if restart_choice == RESTART_CHOICE_LAST_ITERATE_RESET
-                        # #CUDA.@cuprintln("relative primal residual = $(relative_primal_residual)")
-                        # #CUDA.@cuprintln("relative dual residual = $(relative_dual_residual)")
-                        # #CUDA.@cuprintln("ratio_infeas = $(ratio_infeas)")
-                        
-                        # idx==1 && #CUDA.@cuprintlln("Reached 13: Primal Weight update is needed! about to start that...")
+
                         if restart_primal_distance > 1e-16 && restart_dual_distance > 1e-16 && restart_primal_distance < 1e12 && restart_dual_distance < 1e12 && ratio_infeas > 1e-8 && ratio_infeas < 1e8
-                        # if restart_primal_distance > 1e-16 && restart_dual_distance > 1e-16 && restart_primal_distance < 1e12 && restart_dual_distance < 1e12
                             restart_error = log(restart_dual_distance) - log(restart_primal_distance) - log(primal_weight[1])
                             sum_restart_error *= i_smooth
                             sum_restart_error += restart_error
-                            # #CUDA.@cuprintln("dual dist = $(restart_dual_distance), primal dist = $(restart_primal_distance), primal weight = $(primal_weight[1]), error = $restart_error, sum restart error = $sum_restart_error")
 
                             
                             primal_weight[1] *= exp(pid_KP * restart_error + pid_KI * sum_restart_error + pid_KD * (restart_error - last_restart_error))
-                            
-                            # CUDA.@cuprintf("Restart at iteration %i : PID Updated primal weight = %.7f using the error %.7f, and sum of error = %.7f and error diff = %.7f \n", total_iterations, primal_weight[1], restart_error, sum_restart_error, restart_error - last_restart_error)
-                            
+                                                        
                             # update last restart error 
                             last_restart_error = restart_error
                         else 
                             primal_weight[1] = best_primal_weight[1]
-                            
-                            # #CUDA.@cuprintln("Restart: Reset primal weight to best = %.7f \n", primal_weight[1])
-                            
+                                                        
                             sum_restart_error = 0.0
                             last_restart_error = 0.0
                         end
@@ -1488,12 +1135,9 @@ function main_loop_kernel(
                         primal_dual_residual_gap = abs(log10(relative_dual_residual / relative_primal_residual))
 
                         if primal_dual_residual_gap < best_primal_dual_residual_gap
-                            # #CUDA.@cuprintln("Residual Gap Improved:primal_dual_residual gap =  %.7f \n",primal_dual_residual_gap)
                             best_primal_dual_residual_gap = primal_dual_residual_gap
                             best_primal_weight[1] = primal_weight[1]
-                            # #CUDA.@cuprintln("   - best primal weight updated to = %.7f \n", primal_weight[1])
                         end
-                        ##idx==1 && #CUDA.@cuprintlln("Reached 14: Primal Weight updated!")
                     end
                 end
 
@@ -1504,13 +1148,6 @@ function main_loop_kernel(
 
     return nothing
 end
-
-    #-----------------------------------------------------------------------------------------
-
-    # # Add to the cumulative kkt pass count
-    # if idx==1
-    #     cumulative_kkt_passes += 2.0
-    # end
 
 # A quick function to calculate a parallel sum over the first max_len elements in the shared space
 function parallel_sum(shared, block_stride, reduction_stride, maxlen)

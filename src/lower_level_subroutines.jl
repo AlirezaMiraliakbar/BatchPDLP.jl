@@ -113,55 +113,6 @@ function pock_chambolle_rescaling(
     return nothing
 end
 
-function bound_objective_rescaling(
-    problem::LinearProgramSet, # the scaled problem from pock-chambolle method is fed here
-    variable_rescaling::CuArray{Float64}, 
-    constraint_rescaling::CuArray{Float64},  
-    dims::PDLPDims,
-    )
-    GPU_blocks = Int32(CUDA.attribute(CUDA.device(), CUDA.DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT))
-    
-    contrib = CUDA.zeros(Float64, dims.total_LP_length)
-
-    CUDA.@sync @cuda blocks= GPU_blocks threads = 512 compute_bound_contrib_kernel(
-        contrib, 
-        problem.right_hand_side, 
-        dims.total_LP_length, 
-    )
-
-    # 2. Calculate the norms
-    # sum(contrib) directly replaces the complex cub::DeviceReduce block
-    bnd_norm = sqrt(sum(contrib))
-    
-    # norm() natively dispatches to cuBLAS cublasDnrm2 for CuArrays
-    obj_norm = CUDA.norm(problem.objective_vector)
-
-    # 3. Calculate scaling factors
-    constraint_scale = 1.0 / (bnd_norm + 1.0)
-    objective_scale = 1.0 / (obj_norm + 1.0)
-
-    problem.constraint_bound_norm = bnd_norm
-    problem.objective_vector_norm = obj_norm
-
-    # 4. Apply scales
-    # We use Julia's dot-broadcasting (.*=) instead of writing explicit scale_bounds_kernel
-    # and scale_objective_kernel. CUDA.jl automatically fuses these into optimized kernels.
-    
-    # Primal-space bounds (scaled by constraint_scale)
-    problem.right_hand_side         .*= constraint_scale
-    problem.variable_lower_bounds    .*= constraint_scale
-    problem.variable_upper_bounds    .*= constraint_scale
-
-    constraint_rescaling .= constraint_scale
-    variable_rescaling   .= constraint_scale
-    # Dual-space & Objective (scaled by objective_scale)
-
-    problem.objective_vector        .*= objective_scale
-    problem.objective_constant      .*= objective_scale
-
-    return nothing
-end
-
 function scale_problem(
     problem::LinearProgramSet, 
     variable_rescaling::CuArray{Float64}, 
