@@ -263,24 +263,22 @@ function PDLPData(
     sparsity::Matrix{Bool} = fill(true, total_LP_length, n_vars),
     iteration_limit::Int = 1000000,#Int(typemax(Int32)),
     extrapolation_coefficient::Float64 = 1.0,
-    reflection_coefficient::Float64 = 1.0,
+    reflection_coefficient::Float64 = 0.9,
     kkt_matrix_pass_limit::Float64 = Inf,
     termination_evaluation_frequency::Int64 = 64,
     necessary_reduction_for_restart::Float64 = 0.5,
     sufficient_reduction_for_restart::Float64 = 0.2,
     artificial_ratio_for_restart::Float64 = 0.36,
-    abs_tol::Float64 = 1.0E-4,
-    rel_tol::Float64 = 1.0E-4,
+    abs_tol::Float64 = 1.0E-8,
+    rel_tol::Float64 = 1.0E-8,
     skip_hard_problems::Bool = false,
-    pid_KP::Float64 = 0.99,
+    pid_KP::Float64 = 0.1,
     pid_KI::Float64 = 0.01,
-    pid_KD::Float64 = 0.0,
+    pid_KD::Float64 = 0.55,
     i_smooth::Float64 = 0.3
     )
     # Call the sparse constructor to get sparsity information
     nz, nz_rows, nz_cols = sparse_constructor(sparsity)
-    CUDA.seed!(22)
-    eigenvector0 = repeat(CUDA.randn(Float64, total_LP_length), n_LPs)
     return PDLPData(
         LinearProgramSet( # Original LPs
             CUDA.zeros(Float64, n_LPs, n_vars),
@@ -346,8 +344,8 @@ function PDLPData(
             CUDA.zeros(Float64, total_LP_length * n_LPs),
         ),
         PDLPParams( # Parameters
-            20,                               # Iterations for Ruiz rescaling
-            nothing,                              # Alpha for Pock Chambolle rescaling
+            10,                               # Iterations for Ruiz rescaling
+            1,                              # Alpha for Pock Chambolle rescaling
             true,                             # Scale initial primal weight flag
             false,                             # Bound Objective Rescaling flag
             extrapolation_coefficient,        # Extrapolation coefficient used for taking steps
