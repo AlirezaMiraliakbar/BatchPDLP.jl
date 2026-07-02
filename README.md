@@ -1,13 +1,13 @@
 # BatchPDLP.jl
 
-This package applies the PDLP algorithm [[1](#references)] to solve batches of small, structurally similar linear programs (LPs) simultaneously using NVIDIA GPU resources through CUDA.jl [[2](#references)]. It assumes that LPs are provided (or can be generated) in GPU memory, and only stores solution information in GPU memory. I.e., this package does not manage the transfer of LP information to or from the CPU. `BatchPDLP.jl` is meant to be used within a global optimizer such as `EAGO.jl` [[3](#references)] to solve large numbers of LPs of sizes typically seen within global optimization. `BatchPDLP.jl` was tested on batches of LPs with up to roughly 100 variables and 1000 constraints each.
+This package applies the imporved PDLP algorithm basead on restarted Halpern reflection scheme[[1](#references), [2](#references)] to solve batches of small, structurally similar linear programs (LPs) simultaneously using NVIDIA GPU resources through CUDA.jl [[3](#references)]. It assumes that LPs are provided (or can be generated) in GPU memory, and only stores solution information in GPU memory. I.e., this package does not manage the transfer of LP information to or from the CPU. `BatchPDLP.jl` is meant to be used within a global optimizer such as `EAGO.jl` [[4](#references)] to solve large numbers of LPs of sizes typically seen within global optimization. `BatchPDLP.jl` was tested on batches of LPs with up to roughly 100 variables and 1000 constraints each.
 
 
 ## Usage Note
 
-`BatchPDLP.jl` is primarily designed to work with `SourceCodeMcCormick.jl` [[4](#references)], which calculates McCormick relaxations and their subgradients for factorable expressions. These relaxations and their subgradients can then be converted into LP constraints through `BatchPDLP.jl`, after which the PDLP algorithm can be run. Internally, `BatchPDLP.jl` works by launching a kernel with the number of blocks set equal to the number of LPs being solved, meaning the number of LPs per batch should generally be larger than the number of streaming multiprocessors (SMs) in the GPU. 
+`BatchPDLP.jl` is primarily designed to work with `SourceCodeMcCormick.jl` [[5](#references)], which calculates McCormick relaxations and their subgradients for factorable expressions. These relaxations and their subgradients can then be converted into LP constraints through `BatchPDLP.jl`, after which the PDLP algorithm can be run. Internally, `BatchPDLP.jl` works by launching a kernel with the number of blocks set equal to the number of LPs being solved, meaning the number of LPs per batch should generally be larger than the number of streaming multiprocessors (SMs) in the GPU. 
 
-More specifically, `BatchPDLP.jl` is not meant to handle single LP instances. It is explicitly not designed to handle the typical "large" LPs seen in, e.g., LP benchmark test sets, which makes it distinct from many other GPU-accelerated LP solvers such as `cuPDLP.jl` [[5](#references)]. `BatchPDLP.jl` is only meant to be performant when solving hundreds, thousands, or tens of thousands of structurally similar LPs.
+More specifically, `BatchPDLP.jl` is not meant to handle single LP instances. It is explicitly not designed to handle the typical "large" LPs seen in, e.g., LP benchmark test sets, which makes it distinct from many other GPU-accelerated LP solvers such as `cuPDLP.jl` and `cupdlpx`[[6](#references), [7](#references)]. `BatchPDLP.jl` is only meant to be performant when solving hundreds, thousands, or tens of thousands of structurally similar LPs.
 
 ## Basic Functionality
 
@@ -100,7 +100,7 @@ In this example, 10000 LPs are prepared to be solved, and results will be saved 
 
 
 ## Citing BatchPDLP
-Please cite the following paper when using `BatchPDLP.jl`. In plain text form this is:
+Please cite the following papers when using `BatchPDLP.jl`. In plain text form this is:
 ```
 Gottlieb, R. X., Alston, D., and Stuber, M. D. Re-Architected PDLP for Batch Parallelization of Linear Programs. Under Review.
 ```
@@ -121,8 +121,10 @@ A BibTeX entry is given below:
 
 
 ## References
-1. Applegate, D., Díaz, M., Hinder, O., Lu, H., Lubin, M., O’Donoghue, B., Schudy, W.: Practical large-scale linear programming using primal-dual hybrid gradient (2021) https://doi.org/10.48550/ARXIV.2106.04756 arXiv:2106.04756 [math.OC]
-2. Besard, T., Foket, C., and De Sutter, B. Effective Extensible Programming: Unleashing Julia on GPUs. IEEE Transactions on Parallel and Distributed Systems (2018). https://doi.org/10.1109/TPDS.2018.2872064
-3. Wilhelm, M.E., Stuber, M.D.: EAGO.jl: easy advanced global optimization in Julia. Optimization Methods and Software 37(2), 425–450 (2022) https://doi.org/10.1080/10556788.2020.1786566
-4. Gottlieb, R.X., Stuber, M.D.: Automatic generation of GPU kernels for evaluators of McCormick-based relaxations and subgradients. Under Revision (2025)
-5. Lu, H., Yang, J.: cuPDLP.jl: A GPU implementation of restarted primal-dual hybrid gradient for linear programming in Julia (2024) https://doi.org/10.48550/ARXIV.2311.12180 arXiv:2311.12180 [math.OC]
+1.Lu, H., Yang, J.: Restarted Halpern PDHG for Linear Programming (2024) https://doi.org/10.48550/arXiv.2407.16144 arXiv:2407.16144 [math.OC]
+2. Applegate, D., Díaz, M., Hinder, O., Lu, H., Lubin, M., O’Donoghue, B., Schudy, W.: Practical large-scale linear programming using primal-dual hybrid gradient (2021) https://doi.org/10.48550/ARXIV.2106.04756 arXiv:2106.04756 [math.OC]
+3. Besard, T., Foket, C., and De Sutter, B. Effective Extensible Programming: Unleashing Julia on GPUs. IEEE Transactions on Parallel and Distributed Systems (2018). https://doi.org/10.1109/TPDS.2018.2872064
+4. Wilhelm, M.E., Stuber, M.D.: EAGO.jl: easy advanced global optimization in Julia. Optimization Methods and Software 37(2), 425–450 (2022) https://doi.org/10.1080/10556788.2020.1786566
+5. Gottlieb, R.X., Stuber, M.D.: Automatic generation of GPU kernels for evaluators of McCormick-based relaxations and subgradients. Under Revision (2025)
+6. Lu, H., Yang, J.: cuPDLP.jl: A GPU implementation of restarted primal-dual hybrid gradient for linear programming in Julia (2024) https://doi.org/10.48550/ARXIV.2311.12180 arXiv:2311.12180 [math.OC]
+7. Lu, H., Peng, Z., Yang, J.: cuPDLPx: A Further Enhanced GPU-Based First-Order Solver for Linear Programming (2025) https://doi.org/10.48550/arXiv.2507.14051 arXiv:2507.14051 [math.OC]

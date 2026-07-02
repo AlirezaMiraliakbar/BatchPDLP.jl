@@ -124,7 +124,7 @@ function main_loop_kernel(
         ## Only thread 1 of this block will store these information 
         ## the information below does not need to be stored per thread
         if idx==1
-            cumulative_kkt_passes = 0.5
+            cumulative_kkt_passes = 0.0
 
             # Initialize temporary Float64 values needed for calculation
             restart_primal_distance = 0.0
@@ -252,7 +252,7 @@ function main_loop_kernel(
 
                     while idx <= nz_count
                         if active_constraint[active_row + nz_rows[idx]]
-                            CUDA.atomic_add!(CUDA.pointer(shared_space, nz_cols[idx]), scaled_constraint_matrix[active_row + nz_rows[idx], nz_cols[idx]] * current_dual_solution[active_row + nz_rows[idx]])
+                            CUDA.atomic_add!(CUDA.pointer(shared_space, nz_cols[idx]), scaled_constraint_matrix[active_row + nz_rows[idx], nz_cols[idx]] * current_dual_solution[active_row + nz_rows[idx]]) # adds one to kkt passes
                         end
                         idx += block_stride
                     end
@@ -287,7 +287,7 @@ function main_loop_kernel(
 
                     while idx <= nz_count
                         if active_constraint[active_row + nz_rows[idx]]
-                            CUDA.atomic_add!(CUDA.pointer(shared_space, nz_rows[idx]), scaled_constraint_matrix[active_row + nz_rows[idx], nz_cols[idx]] * reflected_primal_solution[LP, nz_cols[idx]])
+                            CUDA.atomic_add!(CUDA.pointer(shared_space, nz_rows[idx]), scaled_constraint_matrix[active_row + nz_rows[idx], nz_cols[idx]] * reflected_primal_solution[LP, nz_cols[idx]]) # adds one to kkt passes
                         end
                         idx += block_stride
                     end
@@ -394,6 +394,10 @@ function main_loop_kernel(
                     sync_threads()   
                 end     
 
+                if idx == 1
+                    cumulative_kkt_passes += Int32(2)
+                end
+
                 while idx <= n_vars
                     current_primal_gradient[LP, idx] = scaled_objective_vector[LP, idx] - current_dual_product[LP, idx]
                     idx += block_stride
@@ -405,7 +409,7 @@ function main_loop_kernel(
                 #                            Compute Fixed-point error                                   #
                 ##########################################################################################
                 sync_threads()
-                # Compute Δx = reflected_primal - pdhg_primal, and ||Δx||²
+                
                 while idx <= n_vars
                     shared_space[idx] = (reflected_primal_solution[LP, idx] - pdhg_primal_solution[LP, idx]) ^ 2
                     idx += block_stride
@@ -421,7 +425,7 @@ function main_loop_kernel(
                 end
                 idx = threadIdx().x
                 sync_threads()
-                # Compute Δy = reflected_dual - pdhg_dual, and ||Δy||²
+
                 while idx <= current_LP_length
                     shared_space[idx] = (reflected_dual_solution[active_row + idx] - pdhg_dual_solution[active_row + idx]) ^ 2
                     idx += block_stride
@@ -432,7 +436,6 @@ function main_loop_kernel(
                     squared_delta_dual = shared_space[1]
                 end
 
-                # Compute A^T Δy (store in shared_space, which has n_vars width)
                 
                 while idx <= current_LP_length
                     residual_delta_dual[active_row + idx] = reflected_dual_solution[active_row + idx] - pdhg_dual_solution[active_row + idx]
@@ -457,7 +460,6 @@ function main_loop_kernel(
                 idx = threadIdx().x
                 sync_threads()
 
-                # Compute cross_term = dot(A^T Δy, Δx)
                 while idx <= n_vars
                     shared_space[idx] *= (reflected_primal_solution[LP, idx] - pdhg_primal_solution[LP, idx])
                     idx += block_stride
@@ -468,13 +470,10 @@ function main_loop_kernel(
                     cross_term = shared_space[1]
                 end
 
-                # Compute candidate fixed-point error and reduction ratio
-                # Formula: sqrt(ω * ||Δx||² + ||Δy||²/ω + 2η * cross_term)
                 if idx==1
                     candidate_fixed_error = sqrt(primal_weight[1] * squared_delta_primal + squared_delta_dual / (primal_weight[1]) + 2.0 * step_size[1] * cross_term)
                 end
 
-                
                 
                 ##########################################################################################
                 #                            Compute Residuals                                           #
@@ -482,7 +481,7 @@ function main_loop_kernel(
                 sync_threads()
                 
                 # ++++++++++++++++++++++++++++++++++++++++++++++++ Updating Primal Product and Dual Product  ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ #
-                # Recompute primal product as A * pdhg_primal
+                # Recompute primal product as G * pdhg_primal
                 while idx <= current_LP_length
                     shared_space[idx] = 0.0
                     idx += block_stride
@@ -504,7 +503,7 @@ function main_loop_kernel(
                     idx += block_stride
                 end
                 idx = threadIdx().x
-                # Dual Product as A^T * pdhg_dual
+                # Dual Product as G^T * pdhg_dual
                 while idx <= n_vars
                     shared_space[idx] = 0.0
                     idx += block_stride
@@ -575,7 +574,7 @@ function main_loop_kernel(
                 #TODO: if bound objective rescaling is set to true we need to uncomment the line below to rescale back primal residual norm 
                 # CI_l2_dual_residual /= objective_vector_norm
 
-                # Compute the primal objective #TODO: check on this why cuplpdx is not scaling it ro original
+                # Compute the primal objective 
                 while idx <= n_vars
                     shared_space[idx] = scaled_objective_vector[LP, idx] * pdhg_primal_solution[LP, idx]
                     idx += block_stride
@@ -587,7 +586,6 @@ function main_loop_kernel(
                 end
 
                 # Compute the dual objective
-                # Part A: dot(dual_slack, pdhg_primal) — variable bound contribution
                 while idx <= n_vars
                     shared_space[idx] = dual_slack[LP, idx] * pdhg_primal_solution[LP, idx]
                     idx += block_stride
@@ -598,7 +596,6 @@ function main_loop_kernel(
                     CI_dual_objective = shared_space[1]
                 end
 
-                # Part B: sum(primal_slack) — constraint bound contribution
                 while idx <= current_LP_length
                     shared_space[idx] = primal_slack[active_row + idx]
                     idx += block_stride
@@ -621,183 +618,6 @@ function main_loop_kernel(
                 
                 # +++++++++++++++++++++++++++++++++ Infeasibility Detection +++++++++++++++++++++++++++++++++++++++++ #
                 #TODO: finish feasiblity detection, cuPDLPx does not do it, but we need it in subproblems
-                
-                # primal infeasibility project
-
-                # while idx <= vars
-                #     delta_primal = max()
-                #     idx += block_stride
-                # end
-                # idx = threadIdx().x
-
-                # # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ Infeasibility Detection +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ #
-                # # Compute Infeasibility Information (Ray-based infeasibility detection)
-                
-                # sync_threads()
-                
-                # while idx <= n_vars
-                #     shared_space[idx] = abs(original_primal_solution[LP, idx])
-                #     idx += block_stride
-                # end
-                # idx = threadIdx().x
-                # parallel_max(shared_space, block_stride, var_stride, n_vars)
-                # # Everyone needs to know the primal ray norm
-                # primal_ray_norm = shared_space[1]
-
-                # # Calculate infeasibility primal solution and primal product
-                # if !iszero(primal_ray_norm)
-                #     while idx <= n_vars
-                #         buffer_kkt_primal_solution[LP, idx] = original_primal_solution[LP, idx] / primal_ray_norm
-                #         idx += block_stride
-                #     end
-                #     idx = threadIdx().x
-                #     while idx <= current_LP_length
-                #         buffer_kkt_primal_product[active_row + idx] = original_primal_product[active_row + idx] / primal_ray_norm
-                #         idx += block_stride
-                #     end
-                #     idx = threadIdx().x
-                # else
-                #     while idx <= n_vars
-                #         buffer_kkt_primal_solution[LP, idx] = original_primal_solution[LP, idx]
-                #         idx += block_stride
-                #     end
-                #     idx = threadIdx().x
-                #     while idx <= current_LP_length
-                #         buffer_kkt_primal_product[active_row + idx] = original_primal_product[active_row + idx]
-                #         idx += block_stride
-                #     end
-                #     idx = threadIdx().x
-                # end
-
-                # # Compute infeasible variable/constraint violations
-                # while idx <= n_vars
-                #     if isfinite(original_variable_lower_bounds[LP, idx])
-                #         buffer_kkt_lower_variable_violation[LP, idx] = max(-buffer_kkt_primal_solution[LP, idx], 0.0)
-                #     else
-                #         buffer_kkt_lower_variable_violation[LP, idx] = 0.0
-                #     end
-                #     if isfinite(original_variable_upper_bounds[LP, idx])
-                #         buffer_kkt_upper_variable_violation[LP, idx] = max(buffer_kkt_primal_solution[LP, idx], 0.0)
-                #     else
-                #         buffer_kkt_upper_variable_violation[LP, idx] = 0.0
-                #     end
-                #     idx += block_stride
-                # end
-                # idx = threadIdx().x
-
-                # # Calculate the max primal ray infeasibility
-                # while idx <= n_vars
-                #     shared_space[idx] = max(abs(buffer_kkt_lower_variable_violation[LP, idx]), 
-                #                             abs(buffer_kkt_upper_variable_violation[LP, idx]))
-                #     idx += block_stride
-                # end
-                # idx = threadIdx().x
-                # parallel_max(shared_space, block_stride, var_stride, n_vars)
-                # if idx==1
-                #     II_max_primal_ray_infeasibility = shared_space[1]
-                # end
-                # while idx <= current_LP_length
-                #     shared_space[idx] = abs(max(-buffer_kkt_primal_product[active_row + idx], 0.0))
-                #     idx += block_stride
-                # end
-                # idx = threadIdx().x
-                # parallel_max(shared_space, block_stride, len_stride, current_LP_length)
-                # if idx==1
-                #     II_max_primal_ray_infeasibility = max(shared_space[1], II_max_primal_ray_infeasibility)
-                # end
-
-                # # Calculate the primal ray linear objective
-                # while idx <= n_vars
-                #     shared_space[idx] = original_objective_vector[LP, idx] * buffer_kkt_primal_solution[LP, idx]
-                #     idx += block_stride
-                # end
-                # idx = threadIdx().x
-                # parallel_sum(shared_space, block_stride, var_stride, n_vars)
-                # if idx==1
-                #     II_primal_ray_linear_objective = shared_space[1]
-                # end
-
-                # # Compute reduced costs and reduced costs violation
-                # while idx <= n_vars
-                #     buffer_kkt_reduced_costs[LP, idx] = max(original_primal_gradient[LP, idx] - original_objective_vector[LP, idx], 0.0) * isfinite(original_variable_lower_bounds[LP, idx]) + 
-                #                                         min(original_primal_gradient[LP, idx] - original_objective_vector[LP, idx], 0.0) * isfinite(original_variable_upper_bounds[LP, idx])
-                #     idx += block_stride
-                # end
-                # idx = threadIdx().x
-
-                # # Compute the dual residual
-                # while idx <= n_vars
-                #     shared_space[idx] = abs(original_primal_gradient[LP, idx] - original_objective_vector[LP, idx] - buffer_kkt_reduced_costs[LP, idx])
-                #     idx += block_stride
-                # end
-                # idx = threadIdx().x
-                # parallel_max(shared_space, block_stride, var_stride, n_vars)
-                # if idx==1
-                #     buffer_kkt_dual_res_inf = shared_space[1]
-                # end
-                # while idx <= current_LP_length
-                #     shared_space[idx] = abs(max(-original_dual_solution[active_row + idx], 0.0))
-                #     idx += block_stride
-                # end
-                # idx = threadIdx().x
-                # parallel_max(shared_space, block_stride, len_stride, current_LP_length)
-                # if idx==1
-                #     buffer_kkt_dual_res_inf = max(shared_space[1], buffer_kkt_dual_res_inf)
-                # end
-
-                # # Compute the dual objective
-                # while idx <= n_vars
-                #     if buffer_kkt_reduced_costs[LP, idx] > 0.0
-                #         shared_space[idx] = original_variable_lower_bounds[LP, idx] * buffer_kkt_reduced_costs[LP, idx]
-                #     elseif buffer_kkt_reduced_costs[LP, idx] < 0.0
-                #         shared_space[idx] = original_variable_upper_bounds[LP, idx] * buffer_kkt_reduced_costs[LP, idx]
-                #     else
-                #         shared_space[idx] = 0.0
-                #     end
-                #     idx += block_stride
-                # end
-                # idx = threadIdx().x
-                # parallel_sum(shared_space, block_stride, var_stride, n_vars)
-                # if idx==1
-                #     buffer_kkt_dual_objective = shared_space[1] + original_objective_constant[LP]
-                # end
-                # while idx <= current_LP_length
-                #     shared_space[idx] = original_right_hand_side[active_row + idx] * original_dual_solution[active_row + idx]
-                #     idx += block_stride
-                # end
-                # idx = threadIdx().x
-                # parallel_sum(shared_space, block_stride, len_stride, current_LP_length)
-                # if idx==1
-                #     buffer_kkt_dual_objective += shared_space[1]
-                # end
-
-                # # Compute infeasibility information using a scaling factor
-                # while idx <= n_vars
-                #     shared_space[idx] = abs(buffer_kkt_reduced_costs[LP, idx])
-                #     idx += block_stride
-                # end
-                # idx = threadIdx().x
-                # parallel_max(shared_space, block_stride, var_stride, n_vars)
-                # if idx==1
-                #     scaling_factor = shared_space[1]
-                # end
-
-                # while idx <= current_LP_length
-                #     shared_space[idx] = abs(original_dual_solution[active_row + idx])
-                #     idx += block_stride
-                # end
-                # idx = threadIdx().x
-                # parallel_max(shared_space, block_stride, len_stride, current_LP_length)
-                # if idx==1
-                #     scaling_factor = max(shared_space[1], scaling_factor)
-                #     if scaling_factor==0.0
-                #         II_max_dual_ray_infeasibility = 0.0
-                #         II_dual_ray_objective = 0.0
-                #     else
-                #         II_max_dual_ray_infeasibility = buffer_kkt_dual_res_inf / scaling_factor
-                #         II_dual_ray_objective = buffer_kkt_dual_objective / scaling_factor
-                #     end
-                # end
                 
                 total_iterations += Int32(termination_evaluation_frequency)
 
@@ -845,8 +665,6 @@ function main_loop_kernel(
                     # Check if we're within the tolerances for primal and dual infeasibility, and that there's
                     # a sufficiently small gap between the primal and dual objective values.
 
-                    
-
                     if (relative_dual_residual < rel_tol) &&
                         (relative_primal_residual < rel_tol) &&
                         (relative_objective_gap < rel_tol)
@@ -854,20 +672,7 @@ function main_loop_kernel(
                         termination_reason[LP] = TERMINATION_REASON_OPTIMAL
                     end
                     
-                    # # Checking on infeasibility after convergence failure
-                    # ## Check primal infeasibility (if we're past the first 10 iterations)
-                    # if (II_dual_ray_objective > 0.0) &&
-                    #     ((II_max_dual_ray_infeasibility / II_dual_ray_objective) <= eps_primal_infeasible) && (total_iterations > 400)
-
-                    #     termination_reason[LP] = TERMINATION_REASON_PRIMAL_INFEASIBLE
-                    # end
-
-                    # # Check dual infeasibility (if we're past the first 10 iterations)
-                    # if (II_primal_ray_linear_objective < 0.0) && 
-                    #     ((II_max_primal_ray_infeasibility / (-II_primal_ray_linear_objective)) <= eps_dual_infeasible)  && (total_iterations > 400)
-
-                    #     termination_reason[LP] = TERMINATION_REASON_DUAL_INFEASIBLE
-                    # end
+                    # TODO: add checking on infeasibility after convergence failure
                 end
                 
 
@@ -916,15 +721,6 @@ function main_loop_kernel(
                         CUDA.atomic_add!(CUDA.pointer(global_counter, 1), Int32(1))
                         CUDA.atomic_add!(CUDA.pointer(iteration_counter, 1), Int32(total_iterations))
                     end
-                    # if idx == 1
-                        
-                    #     CUDA.@cuprintln("Primal Objective: $CI_primal_objective")
-                    #     CUDA.@cuprintln("Dual Objective: $CI_dual_objective")
-                    #     CUDA.@cuprintf("Objective gap %.3e (abs: %.3e) :\n", Float64(relative_objective_gap), Float64(objective_gap))
-                    #     CUDA.@cuprintf("Primal infeas %.3e (abs: %.3e) :\n", Float64(relative_primal_residual), Float64(CI_l2_primal_residual))
-                    #     CUDA.@cuprintf("Dual infeas %.3e  (abs: %.3e) :\n", Float64(relative_dual_residual), Float64(CI_l2_dual_residual))
-                    # end
-                    ##idx==1 && #CUDA.@cuprintlln("Reached 15: since $reason we got terminated, next LP on board!")
                     LP += grid_stride
                     break
                 elseif (reason == TERMINATION_REASON_ITERATION_LIMIT) || 
@@ -938,7 +734,6 @@ function main_loop_kernel(
                     if idx==1
                         if return_code != Int32(3)
                             objectives[LP] = -Inf
-                            objectives[LP] = CI_primal_objective
                         else
                             objectives[LP, Int32(1)] = -Inf
                             objectives[LP, Int32(2)] = -Inf
@@ -972,7 +767,6 @@ function main_loop_kernel(
                         CUDA.atomic_add!(CUDA.pointer(global_counter, 1), Int32(1))
                         CUDA.atomic_add!(CUDA.pointer(iteration_counter, 1), Int32(total_iterations))
                     end
-                    ##idx==1 && #CUDA.@cuprintlln("Reached 15: since $reason we got terminated, next LP on board!")
                     LP += grid_stride
                     break
                 elseif (reason == TERMINATION_REASON_IMPATIENCE)
