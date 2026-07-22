@@ -51,7 +51,9 @@ RestartChoice specifies whether a restart was performed on a given iteration.
 @enum RestartChoice begin
     RESTART_CHOICE_UNSPECIFIED
     RESTART_CHOICE_NO_RESTART
-    RESTART_CHOICE_LAST_ITERATE_RESET
+    RESTART_CHOICE_WEIGHTED_AVERAGE_RESET # => for original version
+    RESTART_CHOICE_RESTART_TO_AVERAGE # => for original version
+    RESTART_CHOICE_LAST_ITERATE_RESET # => for rHalpern version
 end
 
 mutable struct LinearProgramSet
@@ -142,10 +144,38 @@ mutable struct TerminationCriteria
 end
 
 mutable struct KernelStorage
+    # original version fields=====================
+    last_restart_primal_solution::CuArray{Float64}
+    last_restart_primal_gradient::CuArray{Float64}
+    last_restart_dual_solution::CuArray{Float64}
+    last_restart_primal_product::CuArray{Float64}
+    buffer_primal_gradient::CuArray{Float64}
+    avg_primal_solution::CuArray{Float64}
+    avg_primal_gradient::CuArray{Float64}
+    avg_dual_solution::CuArray{Float64}
+    avg_primal_product::CuArray{Float64}
+    sum_primal_solutions::CuArray{Float64}
+    sum_dual_solutions::CuArray{Float64}
+    sum_primal_product::CuArray{Float64}
+    sum_dual_product::CuArray{Float64}
+    original_primal_solution::CuArray{Float64}
+    original_primal_gradient::CuArray{Float64} 
+    original_dual_solution::CuArray{Float64} 
+    original_primal_product::CuArray{Float64} 
+    buffer_kkt_primal_solution::CuArray{Float64} 
+    buffer_kkt_primal_product::CuArray{Float64}
+    buffer_kkt_lower_variable_violation::CuArray{Float64}
+    buffer_kkt_upper_variable_violation::CuArray{Float64}
+    buffer_kkt_reduced_costs::CuArray{Float64}
+    delta_primal::CuArray{Float64}
+    delta_primal_product::CuArray{Float64}
+    delta_dual::CuArray{Float64}
+    # shared fields =============================
     current_primal_solution::CuArray{Float64}
     current_dual_solution::CuArray{Float64}
     current_dual_product::CuArray{Float64}
     current_primal_product::CuArray{Float64}
+    # rHalpern version fields ==================
     current_primal_gradient::CuArray{Float64} 
     initial_primal_solution::CuArray{Float64} 
     initial_dual_solution::CuArray{Float64} 
@@ -159,18 +189,7 @@ mutable struct KernelStorage
     primal_residual::CuArray{Float64}
     primal_slack::CuArray{Float64}
     dual_residual::CuArray{Float64}
-    original_primal_solution::CuArray{Float64}
-    original_primal_gradient::CuArray{Float64} 
-    original_dual_solution::CuArray{Float64} 
-    original_primal_product::CuArray{Float64} 
-    buffer_kkt_primal_solution::CuArray{Float64} 
-    buffer_kkt_primal_product::CuArray{Float64}
-    buffer_kkt_lower_variable_violation::CuArray{Float64}
-    buffer_kkt_upper_variable_violation::CuArray{Float64}
-    buffer_kkt_reduced_costs::CuArray{Float64}
-    delta_primal::CuArray{Float64}
-    delta_primal_product::CuArray{Float64}
-    delta_dual::CuArray{Float64}
+
     eigenvector::CuArray{Float64}
     new_eigenvector::CuArray{Float64}
     u_vector::CuArray{Float64}
@@ -181,12 +200,10 @@ end
 
 
 mutable struct PDLPParams
+    # shared parameters =========================
     ruiz_iterations::Int
     pock_chambolle_alpha::Union{Nothing,Float64}
     scale_initial_primal_weight::Bool
-    bound_objective_rescaling::Bool
-    extrapolation_coefficient::Float64
-    reflection_coefficient::Float64
     kkt_matrix_pass_limit::Float64
     termination_evaluation_frequency::Float64
     necessary_reduction_for_restart::Float64
@@ -195,6 +212,13 @@ mutable struct PDLPParams
     iteration_limit::Int32
     skip_hard_problems::Bool
     termination_criteria::TerminationCriteria
+    # original parameters ======================
+    extrapolation_coefficient::Float64
+    reduction_exponent::Float64
+    growth_exponent::Float64
+    # rHalpern parameters ======================
+    reflection_coefficient::Float64
+    bound_objective_rescaling::Bool
     pid_KP::Float64
     pid_KI::Float64
     pid_KD::Float64
@@ -261,8 +285,10 @@ function PDLPData(
     n_vars::Int, 
     total_LP_length::Int;
     sparsity::Matrix{Bool} = fill(true, total_LP_length, n_vars),
-    iteration_limit::Int = 1000000,#Int(typemax(Int32)),
+    iteration_limit::Int = 1000000,# or Int(typemax(Int32)),
     extrapolation_coefficient::Float64 = 1.0,
+    reduction_exponent::Float64 = 0.3,
+    growth_exponent::Float64 = 0.6,
     reflection_coefficient::Float64 = 0.9,
     kkt_matrix_pass_limit::Float64 = Inf,
     termination_evaluation_frequency::Int64 = 64,
@@ -307,10 +333,39 @@ function PDLPData(
         # CuArray{Float64}(undef, n_LPs * total_LP_length), # Initial primal product
         # CuArray{Float64}(undef, n_LPs, n_vars), # Initial dual product
         KernelStorage(
+            # original fields ============================
+            CUDA.zeros(Float64, n_LPs, n_vars),
+            CUDA.zeros(Float64, n_LPs, n_vars),
+            CUDA.zeros(Float64, total_LP_length * n_LPs),
+            CUDA.zeros(Float64, total_LP_length * n_LPs),
+            CUDA.zeros(Float64, n_LPs, n_vars),
+            CUDA.zeros(Float64, n_LPs, n_vars),
+            CUDA.zeros(Float64, n_LPs, n_vars),
+            CUDA.zeros(Float64, total_LP_length * n_LPs),
+            CUDA.zeros(Float64, total_LP_length * n_LPs),
+            CUDA.zeros(Float64, n_LPs, n_vars),
+            CUDA.zeros(Float64, total_LP_length * n_LPs),
+            CUDA.zeros(Float64, total_LP_length * n_LPs),
+            CUDA.zeros(Float64, n_LPs, n_vars),
+            # - this is original_primal_solution forward
+            CUDA.zeros(Float64, n_LPs, n_vars), 
+            CUDA.zeros(Float64, n_LPs, n_vars), 
+            CUDA.zeros(Float64, total_LP_length * n_LPs), 
+            CUDA.zeros(Float64, total_LP_length * n_LPs), 
+            CUDA.zeros(Float64, n_LPs, n_vars), 
+            CUDA.zeros(Float64, total_LP_length * n_LPs),
+            CUDA.zeros(Float64, n_LPs, n_vars), 
+            CUDA.zeros(Float64, n_LPs, n_vars),
+            CUDA.zeros(Float64, n_LPs, n_vars), 
+            CUDA.zeros(Float64, n_LPs, n_vars), 
+            CUDA.zeros(Float64, total_LP_length * n_LPs),
+            CUDA.zeros(Float64, total_LP_length * n_LPs),
+            # shared fields ==============================
             CUDA.zeros(Float64, n_LPs, n_vars),
             CUDA.zeros(Float64, total_LP_length * n_LPs),
             CUDA.zeros(Float64, n_LPs, n_vars),
             CUDA.zeros(Float64, total_LP_length * n_LPs),
+            # rHalpern fields ============================
             CUDA.zeros(Float64, n_LPs, n_vars), 
             CUDA.zeros(Float64, n_LPs, n_vars), 
             CUDA.zeros(Float64, total_LP_length * n_LPs), 
@@ -324,32 +379,17 @@ function PDLPData(
             CUDA.zeros(Float64, total_LP_length * n_LPs),
             CUDA.zeros(Float64, total_LP_length * n_LPs),
             CUDA.zeros(Float64, n_LPs, n_vars), 
-            CUDA.zeros(Float64, n_LPs, n_vars), 
-            CUDA.zeros(Float64, n_LPs, n_vars), 
-            CUDA.zeros(Float64, total_LP_length * n_LPs), 
-            CUDA.zeros(Float64, total_LP_length * n_LPs), 
-            CUDA.zeros(Float64, n_LPs, n_vars), 
-            CUDA.zeros(Float64, total_LP_length * n_LPs),
-            CUDA.zeros(Float64, n_LPs, n_vars), 
-            CUDA.zeros(Float64, n_LPs, n_vars),
-            CUDA.zeros(Float64, n_LPs, n_vars), 
-            CUDA.zeros(Float64, n_LPs, n_vars), 
-            CUDA.zeros(Float64, total_LP_length * n_LPs),
-            CUDA.zeros(Float64, total_LP_length * n_LPs),
             CUDA.ones(Float64, total_LP_length * n_LPs),#6 eigenvec
             CUDA.zeros(Float64, total_LP_length * n_LPs),#5 new_eigenvec
             CUDA.zeros(Float64, n_LPs, n_vars),#4 u_vec
             CUDA.zeros(Float64, n_LPs, n_vars),
             CUDA.zeros(Float64, total_LP_length * n_LPs),
-            CUDA.zeros(Float64, total_LP_length * n_LPs),
+            CUDA.zeros(Float64, total_LP_length * n_LPs),       
         ),
         PDLPParams( # Parameters
             10,                               # Iterations for Ruiz rescaling
-            1,                              # Alpha for Pock Chambolle rescaling
+            1,                                # Alpha for Pock Chambolle rescaling
             true,                             # Scale initial primal weight flag
-            false,                             # Bound Objective Rescaling flag
-            extrapolation_coefficient,        # Extrapolation coefficient used for taking steps
-            reflection_coefficient,           # Reflection Coefficient for Halpern Scheme
             kkt_matrix_pass_limit,            # Limit for KKT matrix passes (default Inf)
             termination_evaluation_frequency, # Number of PDLP steps to take before checking termination criteria (default: 200)
             necessary_reduction_for_restart,  # Necessary reduction for restart (default 0.8)
@@ -366,6 +406,13 @@ function PDLPData(
                 iteration_limit,  # Iteration limit
                 kkt_matrix_pass_limit # KKT matrix pass limit,
             ),
+            # ============================= Original  ==========================================
+            extrapolation_coefficient,        # Extrapolation coefficient used for taking steps
+            reduction_exponent,               # Reduction exponent (for step size updates)
+            growth_exponent,                  # Growth coefficient (for step size updates)
+            # ============================= rHalpern ==========================================
+            reflection_coefficient,           # Reflection Coefficient for Halpern Scheme
+            false,                # Bound Objective Rescaling flag
             pid_KP,
             pid_KI,
             pid_KD,

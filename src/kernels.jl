@@ -723,8 +723,52 @@ end
 
 # This kernel calculates the initial primal weight by taking the norm of the objective
 # vector and the right-hand side, for each LP, and using their ratio to set the
-# primal weight
+# primal weight as cupdlp.jl does
 function primal_weight_kernel(
+    result, 
+    objective_vector, 
+    right_hand_side, 
+    n_groups, 
+    group_length, 
+    current_length
+    )
+
+    idx = threadIdx().x + (blockIdx().x - Int32(1)) * blockDim().x
+    stride = blockDim().x * gridDim().x
+    width = Int32(size(objective_vector, 2))
+
+    while idx <= n_groups
+        # Calculate the objective norm first
+        obj_norm = 0.0
+        col_or_row = Int32(1)
+        while col_or_row <= width
+            obj_norm += objective_vector[idx,col_or_row]^2
+            col_or_row += Int32(1)
+        end
+
+        # Then calculate the right-hand side norm
+        rhs_norm = 0.0
+        col_or_row = Int32(1)
+        while col_or_row <= current_length
+            rhs_norm += right_hand_side[(idx - Int32(1))*group_length + col_or_row]^2
+            col_or_row += Int32(1)
+        end
+
+        # And finally, calculate the primal importance and save it to the result
+        if obj_norm > 0.0 && rhs_norm > 0.0
+            result[idx] = sqrt(obj_norm)/sqrt(rhs_norm)
+        else
+            result[idx] = 1.0
+        end
+        idx += stride
+    end
+    return nothing
+end
+
+# This kernel calculates the initial primal weight by taking the norm of the objective
+# vector and the right-hand side, for each LP, and using their ratio to set the
+# primal weight as cupdlpx does
+function primal_weight_kernel_rHalpern(
     result, 
     objective_vector, 
     right_hand_side, 

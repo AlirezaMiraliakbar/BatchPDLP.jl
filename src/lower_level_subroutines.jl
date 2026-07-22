@@ -156,20 +156,32 @@ end
 function select_initial_primal_weight(
     primal_weight::CuArray{Float64},
     problem::LinearProgramSet,
-    dims::PDLPDims
+    dims::PDLPDims,
+    version::Symbol
     )
     # Theoretically the primal importance can change, but the default in the MOI_wrapper
     # is to set it to 1.0. The other parameters are un-settable in cuPDLP but theoretically
     # could be changed as well
     GPU_blocks = Int32(CUDA.attribute(CUDA.device(), CUDA.DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT))
-    CUDA.@sync @cuda blocks=GPU_blocks threads=512 primal_weight_kernel(
-        primal_weight, 
-        problem.objective_vector, 
-        problem.right_hand_side, 
-        dims.n_LPs, 
-        dims.total_LP_length, 
-        dims.current_LP_length
-        )
+    if version == :original
+        CUDA.@sync @cuda blocks=GPU_blocks threads=512 primal_weight_kernel(
+            primal_weight, 
+            problem.objective_vector, 
+            problem.right_hand_side, 
+            dims.n_LPs, 
+            dims.total_LP_length, 
+            dims.current_LP_length
+            )
+    elseif version == :rHalpern 
+        CUDA.@sync @cuda blocks=GPU_blocks threads=512 primal_weight_kernel_rHalpern(
+            primal_weight, 
+            problem.objective_vector, 
+            problem.right_hand_side, 
+            dims.n_LPs, 
+            dims.total_LP_length, 
+            dims.current_LP_length
+            )
+    end
     return nothing
 end
 
@@ -502,7 +514,7 @@ function update_constant_step_size(problem::LinearProgramSet,
     nz_cols::CuArray{Int32},
     active_constraint::CuArray{Bool},
     dims::PDLPDims)
-    # println("calculating step size using power iteration...")
+
     n_vars = dims.n_vars
     max_value = max(dims.current_LP_length, n_vars)
     shmem_bytes = max_value * sizeof(Float64) 

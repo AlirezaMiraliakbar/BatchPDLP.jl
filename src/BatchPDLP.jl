@@ -33,6 +33,7 @@ module BatchPDLP
     include(joinpath(@__DIR__, "structs.jl"))
     include(joinpath(@__DIR__, "kernels.jl"))
     include(joinpath(@__DIR__, "main_loop.jl"))
+    include(joinpath(@__DIR__, "main_loop_rHalpern.jl"))
     include(joinpath(@__DIR__, "lower_level_subroutines.jl"))
     include(joinpath(@__DIR__, "primary_subroutines.jl"))
 end
