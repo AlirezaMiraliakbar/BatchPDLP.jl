@@ -271,7 +271,7 @@ function run_example(example::LoadedProblem, n_LPs::Int, n_cuts::Int; run_BatchP
         
         PDLP_data.parameters.iteration_limit = Int32(stop_here)
         try
-            PDLP_95pct_solving_time[1] = @elapsed PDLP(PDLP_data, solutions=PDLP_solutions, objectives=PDLP_objectives, return_both_obj=true)
+            PDLP_95pct_solving_time[1] = @elapsed PDLP(PDLP_data, solutions=PDLP_solutions, objectives=PDLP_objectives, version=:rHalpern, return_both_obj=true)
         catch
             PDLP_95pct_solving_time[1] = NaN
         end
@@ -292,7 +292,7 @@ function run_example(example::LoadedProblem, n_LPs::Int, n_cuts::Int; run_BatchP
     println("Solving with tolerance of 1E-8")
     if run_BatchPDLP
         try
-            PDLP_solving_time[1] = @elapsed PDLP(PDLP_data, solutions=PDLP_solutions, objectives=PDLP_objectives, return_both_obj=true)
+            PDLP_solving_time[1] = @elapsed PDLP(PDLP_data, solutions=PDLP_solutions, objectives=PDLP_objectives, version=:rHalpern, return_both_obj=true)
         catch
             PDLP_solving_time[1] = NaN
         end
@@ -315,7 +315,7 @@ function run_example(example::LoadedProblem, n_LPs::Int, n_cuts::Int; run_BatchP
     # Solve again with lower tolerances
     if run_BatchPDLP
         try
-            PDLP_lowres_solving_time[1] = @elapsed PDLP(PDLP_data, solutions=PDLP_lowres_solutions, objectives=PDLP_lowres_objectives, return_both_obj=true)
+            PDLP_lowres_solving_time[1] = @elapsed PDLP(PDLP_data, solutions=PDLP_lowres_solutions, objectives=PDLP_lowres_objectives, version=:rHalpern, return_both_obj=true)
         catch
             PDLP_lowres_solving_time[1] = NaN
         end
