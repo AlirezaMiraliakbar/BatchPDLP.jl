@@ -189,7 +189,6 @@ mutable struct KernelStorage
     primal_residual::CuArray{Float64}
     primal_slack::CuArray{Float64}
     dual_residual::CuArray{Float64}
-
     eigenvector::CuArray{Float64}
     new_eigenvector::CuArray{Float64}
     u_vector::CuArray{Float64}

@@ -40,7 +40,7 @@ function PDLP(
     validate(PDLP_data)
 
     # Reset all fields relevant to problem status
-    reset_all_fields!(PDLP_data) # TODO: needs to get updated for the mergeed structs
+    reset_all_fields!(PDLP_data)
 
     # Perform rescaling. Note that if hot-starting is to be added in the future, you should save all
     # primal/dual information (rather than only primal solutions and dual objectives), and then here,

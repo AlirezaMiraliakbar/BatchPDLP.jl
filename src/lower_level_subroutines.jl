@@ -33,10 +33,6 @@ function ruiz_rescaling(
             dims.current_LP_length, # current_LP_length
             dims.total_LP_length # total_LP_length
             )
-        # we got temp_constraint_rescaling from ruiz_constraint_kernel 
-        # println("iteration $j of Ruiz rescaling method: \n")
-        # println("   - temp_variable_rescaling = $temp_variable_rescaling \n")
-        # println("   - temp_constraint_rescaling = $temp_constraint_rescaling \n")
             
         
         # Use the temp variable and constraint rescaling values to scale the problem
@@ -91,8 +87,6 @@ function pock_chambolle_rescaling(
         alpha, 
         )
 
-    # println("   - temp_variable_rescaling at pock_chambolle = $temp_variable_rescaling \n")
-    # println("   - temp_constraint_rescaling at pock_chambolle = $temp_constraint_rescaling \n")
     # Apply the rescaling values to the problem
     scale_problem(
         problem, 
