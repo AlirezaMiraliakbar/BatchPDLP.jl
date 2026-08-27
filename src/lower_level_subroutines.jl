@@ -23,9 +23,7 @@ function ruiz_rescaling(
             problem.constraint_matrix, 
             dims.current_LP_length, 
             dims.total_LP_length
-            )
-        # we got temp_variable_rescaling from ruiz_variable_kernel 
-        
+            )        
         # Constraint resscaling. sqrt of the maximum value of each row of the constraint matrix
         CUDA.@sync @cuda blocks=GPU_blocks threads=512 ruiz_constraint_kernel(
             temp_constraint_rescaling, # result_storage
